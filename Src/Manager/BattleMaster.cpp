@@ -81,13 +81,9 @@ namespace App {
     }
 
     void BattleMaster::AddLog(const std::string& message) {
-        m_actionLog.push_back(message);
-
-        if (m_actionLog.size() > 100) {
-            m_actionLog.erase(m_actionLog.begin());
+        if (m_ui) {
+            m_ui->AddLog(message);
         }
-
-        m_logScrollOffset = std::max(0, (int)m_actionLog.size() - 6);
     }
     bool BattleMaster::Is1PTurn() const {
         return (m_currentPhase == Phase::P1_Move || m_currentPhase == Phase::P1_Action);
@@ -451,16 +447,21 @@ namespace App {
         //  ログパネルのホイールスクロール処理
         // ==========================================
         int wheel = GetMouseWheelRotVol(); // マウスホイールの回転量を取得
-        if (wheel != 0) {
-            Vector2 mPos = input.GetMousePos();
-            // ログパネルの矩形範囲内にマウスがあるか判定
-            if (mPos.x >= 40 && mPos.x <= 540 && mPos.y >= LOG_PANEL_Y && mPos.y <= LOG_PANEL_Y + 200) {
-                m_logScrollOffset -= wheel; // 上スクロール(正)で過去に戻る
+        //if (wheel != 0) {
+        //    Vector2 mPos = input.GetMousePos();
+        //    // ログパネルの矩形範囲内にマウスがあるか判定
+        //    if (mPos.x >= 40 && mPos.x <= 540 && mPos.y >= LOG_PANEL_Y && mPos.y <= LOG_PANEL_Y + 200) {
+        //        m_logScrollOffset -= wheel; // 上スクロール(正)で過去に戻る
 
-                int maxOffset = std::max(0, (int)m_actionLog.size() - 6);
-                if (m_logScrollOffset < 0) m_logScrollOffset = 0;
-                if (m_logScrollOffset > maxOffset) m_logScrollOffset = maxOffset;
-            }
+        //        int maxOffset = std::max(0, (int)m_actionLog.size() - 6);
+        //        if (m_logScrollOffset < 0) m_logScrollOffset = 0;
+        //        if (m_logScrollOffset > maxOffset) m_logScrollOffset = maxOffset;
+        //    }
+        //}int wheel = GetMouseWheelRotVol();
+        if (wheel != 0 && m_ui) {
+            Vector2 mPos = input.GetMousePos();
+            // 全て UI クラスの ScrollLog 関数にお任せする
+            m_ui->ScrollLog(wheel, mPos.x, mPos.y);
         }
 
         m_shaderTime += 0.0016f + (0.01f * m_effectIntensity);

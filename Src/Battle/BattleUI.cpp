@@ -14,7 +14,7 @@
 #endif
 
 namespace App {
-    using namespace Config; // ★Config内のSCREEN_WやCOL_P1()を直接使えるようにする
+    using namespace Config;
 
     BattleUI::BattleUI()
         : m_psHandle(-1), m_cbHandle(-1), m_shaderTime(0.0f)
@@ -42,10 +42,17 @@ namespace App {
         m_logScrollOffset = std::max(0, (int)m_actionLog.size() - 6);
     }
 
+
     void BattleUI::ScrollLog(int wheelDelta, float mouseX, float mouseY) {
+        // ログパネルの範囲内にマウスがあるか
         if (mouseX >= 40 && mouseX <= 540 && mouseY >= LOG_PANEL_Y && mouseY <= LOG_PANEL_Y + 200) {
+
+            // UI側で管理しているログ件数に基づいて計算
             m_logScrollOffset -= wheelDelta;
+
+            // 最大スクロール可能位置
             int maxOffset = std::max(0, (int)m_actionLog.size() - 6);
+
             if (m_logScrollOffset < 0) m_logScrollOffset = 0;
             if (m_logScrollOffset > maxOffset) m_logScrollOffset = maxOffset;
         }
@@ -643,10 +650,10 @@ namespace App {
         drawUnitCard(40, 100, master.m_player.get(), true, p1PreviewNum, p1PreviewStocks, p1PreviewScore, p1HasScorePreview);
         drawUnitCard(1380, 100, master.m_enemy.get(), false, p2PreviewNum, p2PreviewStocks, p2PreviewScore, p2HasScorePreview);
 
-
         // ==========================================
          // ログパネル描画(スクロール＆スクロールバー対応)
          // ==========================================
+
         int f22 = GetCachedFont(22);
         int f20 = GetCachedFont(20);
 
@@ -657,18 +664,16 @@ namespace App {
 
         // ログが6件以上ある場合はスクロールバーを描画
         if (maxLogOffset > 0) {
-            DrawStringToHandle(85, LOG_PANEL_Y + 13, " (マウスホイールでスクロール)", GetColor(100, 100, 120), GetCachedFont(16));
-
             // スクロールバーの背景溝
             DrawBox(530, LOG_PANEL_Y + 45, 535, LOG_PANEL_Y + 195, GetColor(30, 30, 40), TRUE);
 
-            // つまみの位置を計算して描画
+            // つまみの位置
             float scrollRatio = (float)m_logScrollOffset / maxLogOffset;
-            int thumbY = LOG_PANEL_Y + 45 + (int)(scrollRatio * (150 - 30)); // 30はつまみの高さ
+            int thumbY = LOG_PANEL_Y + 45 + (int)(scrollRatio * (150 - 30));
             DrawBox(530, thumbY, 535, thumbY + 30, GetColor(100, 150, 200), TRUE);
         }
 
-        // オフセットから6件分のログを抽出して描画
+        // 実際にログの文字列を描画するループ
         int startIdx = m_logScrollOffset;
         int endIdx = std::min((int)m_actionLog.size(), startIdx + 6);
 
