@@ -314,7 +314,7 @@ namespace App {
                     int targetCurrentHp = isHoverSelf ? disp_aNum : disp_tNum;
                     int currentStocks = applyTo1P ? master.m_player->GetStocks() : master.m_enemy->GetStocks();
 
-                    int newHpRaw = targetCurrentHp + intRes;
+                    int newHpRaw = intRes;
                     int stockChange = 0;
                     int simulatedHp = newHpRaw;
                     while (simulatedHp <= 0) { stockChange--; simulatedHp += 9; }
@@ -839,7 +839,7 @@ namespace App {
                     if (isHoverSelf || isHoverEnemy) {
                         std::string targetName = isHoverSelf ? (activeActor == master.m_player.get() ? "1P" : "2P") : (activeTarget == master.m_player.get() ? "1P" : "2P");
                         int targetCurrentHp = isHoverSelf ? disp_aNum : disp_tNum;
-                        int newHpRaw = targetCurrentHp + intRes;
+                        int newHpRaw = intRes;
                         int stockChange = 0;
                         int simulatedHp = newHpRaw;
                         while (simulatedHp <= 0) { stockChange--; simulatedHp += 9; }

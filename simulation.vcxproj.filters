@@ -60,9 +60,6 @@
     <ClCompile Include="Src\Common\Vector2.cpp">
       <Filter>Src\Common</Filter>
     </ClCompile>
-    <ClCompile Include="Src\Manager\BattleMaster.cpp">
-      <Filter>Src\Manager</Filter>
-    </ClCompile>
     <ClCompile Include="Src\Object\Unit\UnitBase.cpp">
       <Filter>Src\Object\Unit</Filter>
     </ClCompile>
@@ -95,6 +92,7 @@
     </ClCompile>
     <ClCompile Include="Src\Utility\AppConfig.cpp" />
     <ClCompile Include="Src\Battle\BattleUI.cpp" />
+    <ClCompile Include="Src\Manager\BattleMaster.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Src\Application.h">
@@ -114,9 +112,6 @@
     </ClInclude>
     <ClInclude Include="Src\Common\Vector2.h">
       <Filter>Src\Common</Filter>
-    </ClInclude>
-    <ClInclude Include="Src\Manager\BattleMaster.h">
-      <Filter>Src\Manager</Filter>
     </ClInclude>
     <ClInclude Include="Src\Object\Unit\UnitBase.h">
       <Filter>Src\Object\Unit</Filter>
@@ -150,6 +145,7 @@
     </ClInclude>
     <ClInclude Include="Src\Utility\AppConfig.h" />
     <ClInclude Include="Src\Battle\BattleUI.h" />
+    <ClInclude Include="Src\Manager\BattleMaster.h" />
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="Src\PixelShader.hlsl">

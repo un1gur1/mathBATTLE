@@ -42,7 +42,7 @@ namespace {
     inline unsigned int COL_WARN() { return GetColor(255, 255, 0); }
     inline unsigned int COL_INFO() { return GetColor(200, 100, 255); }
     inline unsigned int COL_DISABLE() { return GetColor(150, 150, 150); }
-	inline unsigned int COL_TEXT_OFF() { return GetColor(120, 120, 120); }
+    inline unsigned int COL_TEXT_OFF() { return GetColor(120, 120, 120); }
 
     std::mt19937 g_rng(std::random_device{}());
 
@@ -85,6 +85,18 @@ namespace App {
             m_ui->AddLog(message);
         }
     }
+
+    void BattleMaster::SetClassicDefeat(UnitBase& loser, const std::string& reason) {
+        if (m_isBattleFinished) return;
+
+        std::string loserName = (&loser == m_player.get()) ? "1P" : "2P";
+
+        m_isBattleFinished = true;
+        m_is1PWinner = (&loser == m_enemy.get());
+
+        AddLog("【決着】 " + loserName + " は " + reason + " により、予備バッテリーを使い切って戦闘不能！");
+    }
+
     bool BattleMaster::Is1PTurn() const {
         return (m_currentPhase == Phase::P1_Move || m_currentPhase == Phase::P1_Action);
     }
@@ -94,6 +106,48 @@ namespace App {
 
     UnitBase* BattleMaster::GetTargetUnit() const {
         return Is1PTurn() ? static_cast<UnitBase*>(m_enemy.get()) : static_cast<UnitBase*>(m_player.get());
+    }
+
+    UnitBase* BattleMaster::GetUnitBySide(bool is1P) const {
+        return is1P ? static_cast<UnitBase*>(m_player.get()) : static_cast<UnitBase*>(m_enemy.get());
+    }
+
+    void BattleMaster::ReserveOperatorUpkeepIfNeeded(UnitBase& unit, bool is1P) {
+        if (m_ruleMode != RuleMode::CLASSIC) return;
+        if (unit.IsMoving()) return;
+        if (unit.GetOp() == '\0') return;
+
+        bool& pending = is1P ? m_p1OpCostPending : m_p2OpCostPending;
+        if (pending) return;
+
+        pending = true;
+        AddLog(std::string("【警告】 ") + (is1P ? "1P" : "2P") +
+            ": 演算子負荷を検知。ターン終了時に保持中ならバッテリーが 1 減少します。");
+    }
+
+    void BattleMaster::ApplyOperatorUpkeepCost(bool is1P) {
+        if (m_ruleMode != RuleMode::CLASSIC) return;
+
+        bool& pending = is1P ? m_p1OpCostPending : m_p2OpCostPending;
+        if (!pending) return;
+
+        UnitBase* unit = GetUnitBySide(is1P);
+        if (unit && unit->GetOp() != '\0') {
+            unit->AddStocks(-1);
+            AddLog(std::string("【負荷】 ") + (is1P ? "1P" : "2P") +
+                ": 演算子を保持していたため、バッテリーが 1 減少しました。");
+        }
+
+        pending = false;
+    }
+
+    void BattleMaster::FinishActionPhase(bool is1P, Phase nextTurnPhase) {
+        ApplyOperatorUpkeepCost(is1P);
+
+        m_currentPhase = nextTurnPhase;
+        if (!is1P) {
+            m_mapGrid.UpdateTurn();
+        }
     }
 
     void BattleMaster::Init() {
@@ -138,6 +192,12 @@ namespace App {
 
         g_aiStayCount1P = 0;
         g_aiStayCount2P = 0;
+
+        m_p1OpCostPending = false;
+        m_p2OpCostPending = false;
+
+        m_isBattleFinished = false;
+        m_is1PWinner = false;
 
         m_ui = std::make_unique<BattleUI>();
         m_ui->Init();
@@ -201,7 +261,7 @@ namespace App {
         }
 
         if (m_hoverGrid == pos) {
-            activeUnit.AddNumber(-1);
+            AddPowerWithBattery(activeUnit, -1, "待機");
             m_isPlayerSelected = false;
             m_currentPhase = nextPhase;
             ProceduralAudio::GetInstance().PlayPowerSE(1);
@@ -220,7 +280,7 @@ namespace App {
           // プレイヤー移動時のログ出力(HandleMoveInput内)
           // ==========================================
         ProceduralAudio::GetInstance().PlayPowerSE(5);
-        activeUnit.AddNumber(-cost);
+        AddPowerWithBattery(activeUnit, -cost, "移動");
         std::queue<Vector2> autoPath;
         int dx = std::abs(m_hoverGrid.x - pos.x);
         int dy = std::abs(m_hoverGrid.y - pos.y);
@@ -244,7 +304,7 @@ namespace App {
                 curr.y += stepY;
                 autoPath.push(m_mapGrid.GetCellCenter(curr.x, curr.y));
             }
-            
+
             AddLog("【移動】 " + myName + " が (" + std::to_string(m_hoverGrid.x + 1) + "," + std::to_string(9 - m_hoverGrid.y) + ") へ移動(パワー -" + std::to_string(cost) + ")");
         }
 
@@ -256,11 +316,14 @@ namespace App {
     void BattleMaster::HandleActionInput(UnitBase& actor, UnitBase& targetUnit) {
         if (actor.IsMoving()) return;
 
+        const bool is1P = (&actor == m_player.get());
+        Phase nextTurnPhase = is1P ? Phase::P2_Move : Phase::P1_Move;
+
         IntVector2 pos = actor.GetGridPos();
         char pickedItem = m_mapGrid.PickUpItem(pos.x, pos.y);
         if (pickedItem != '\0') {
             actor.SetOp(pickedItem);
-            std::string name = (&actor == m_player.get()) ? "1P" : "2P";
+            std::string name = is1P ? "1P" : "2P";
             AddLog("【取得】 " + name + "が [" + std::string(1, pickedItem) + "] を取得！");
 
             if (pickedItem == '+') ProceduralAudio::GetInstance().PlayPowerSE(5);
@@ -272,12 +335,10 @@ namespace App {
         IntVector2 targetPos = targetUnit.GetGridPos();
         bool canAttack = (std::abs(pos.x - targetPos.x) + std::abs(pos.y - targetPos.y) == 1);
         bool hasOp = (actor.GetOp() != '\0');
-        Phase nextTurnPhase = (&actor == m_player.get()) ? Phase::P2_Move : Phase::P1_Move;
 
         if (!canAttack || !hasOp) {
             AddLog("【待機】 行動を終了");
-            m_currentPhase = nextTurnPhase;
-            if (&actor != m_player.get()) m_mapGrid.UpdateTurn();
+            FinishActionPhase(is1P, nextTurnPhase);
             return;
         }
 
@@ -286,25 +347,32 @@ namespace App {
 
         Vector2 mousePos = input.GetMousePos();
         IntVector2 hoverGrid = m_mapGrid.ScreenToGrid(mousePos);
-        bool is1P = (&actor == m_player.get());
         bool actionDone = false;
 
-        if (CheckButtonClick(600, 960, 220, 60, mousePos) || hoverGrid == pos || (CheckButtonClick(40, 100, 500, 650, mousePos) && is1P) || (CheckButtonClick(1380, 100, 500, 650, mousePos) && !is1P)) {
+        if (CheckButtonClick(600, 960, 220, 60, mousePos) ||
+            hoverGrid == pos ||
+            (CheckButtonClick(40, 100, 500, 650, mousePos) && is1P) ||
+            (CheckButtonClick(1380, 100, 500, 650, mousePos) && !is1P)) {
             ProceduralAudio::GetInstance().PlayPowerSE(6);
-            ExecuteBattle(actor, targetUnit, actor); actionDone = true;
+            ExecuteBattle(actor, targetUnit, actor);
+            actionDone = true;
         }
-        else if (CheckButtonClick(850, 960, 220, 60, mousePos) || hoverGrid == targetPos || (CheckButtonClick(40, 100, 500, 650, mousePos) && !is1P) || (CheckButtonClick(1380, 100, 500, 650, mousePos) && is1P)) {
+        else if (CheckButtonClick(850, 960, 220, 60, mousePos) ||
+            hoverGrid == targetPos ||
+            (CheckButtonClick(40, 100, 500, 650, mousePos) && !is1P) ||
+            (CheckButtonClick(1380, 100, 500, 650, mousePos) && is1P)) {
             ProceduralAudio::GetInstance().PlayPowerSE(6);
-            ExecuteBattle(actor, targetUnit, targetUnit); actionDone = true;
+            ExecuteBattle(actor, targetUnit, targetUnit);
+            actionDone = true;
         }
         else if (CheckButtonClick(1100, 960, 220, 60, mousePos)) {
             ProceduralAudio::GetInstance().PlayPowerSE(2);
-            AddLog("【待機】 行動を終了"); actionDone = true;
+            AddLog("【待機】 行動を終了");
+            actionDone = true;
         }
 
         if (actionDone) {
-            m_currentPhase = nextTurnPhase;
-            if (!is1P) m_mapGrid.UpdateTurn();
+            FinishActionPhase(is1P, nextTurnPhase);
         }
     }
 
@@ -375,9 +443,23 @@ namespace App {
                 if (myOp == '/') targetMeIsBetter = true;
                 else {
                     auto calcDmg = [](int currentHp, int currentStocks, int val, int& outHp, int& outStocks) {
-                        outHp = currentHp + val; outStocks = currentStocks;
-                        while (outHp <= 0) { outStocks--; outHp += 9; }
-                        while (outHp > 9) { outStocks++; outHp -= 9; }
+                        (void)currentHp; // 書き換え式では現在値を使わない
+
+                        outHp = val;
+                        outStocks = currentStocks;
+
+                        if (outHp <= 0) {
+                            outStocks -= 1;
+                            while (outHp <= 0) {
+                                outHp += 9;
+                            }
+                        }
+                        else if (outHp > 9) {
+                            outStocks += 1;
+                            while (outHp > 9) {
+                                outHp -= 9;
+                            }
+                        }
                         };
 
                     int myHpNext, myStNext, enHpNext, enStNext;
@@ -403,9 +485,10 @@ namespace App {
             ProceduralAudio::GetInstance().PlayPowerSE(2);
         }
 
-        if (!is1P) m_mapGrid.UpdateTurn();
-        m_currentPhase = is1P ? Phase::P2_Move : Phase::P1_Move;
-        if (is1P) m_playerAIStarted = false; else m_enemyAIStarted = false;
+
+        FinishActionPhase(is1P, is1P ? Phase::P2_Move : Phase::P1_Move);
+        if (is1P) m_playerAIStarted = false;
+        else m_enemyAIStarted = false;
     }
 
     void BattleMaster::Update() {
@@ -443,25 +526,10 @@ namespace App {
         if (m_enemy)  m_enemy->Update();
         m_hoverGrid = m_mapGrid.ScreenToGrid(input.GetMousePos());
 
-        // ==========================================
-        //  ログパネルのホイールスクロール処理
-        // ==========================================
-        int wheel = GetMouseWheelRotVol(); // マウスホイールの回転量を取得
-        //if (wheel != 0) {
-        //    Vector2 mPos = input.GetMousePos();
-        //    // ログパネルの矩形範囲内にマウスがあるか判定
-        //    if (mPos.x >= 40 && mPos.x <= 540 && mPos.y >= LOG_PANEL_Y && mPos.y <= LOG_PANEL_Y + 200) {
-        //        m_logScrollOffset -= wheel; // 上スクロール(正)で過去に戻る
-
-        //        int maxOffset = std::max(0, (int)m_actionLog.size() - 6);
-        //        if (m_logScrollOffset < 0) m_logScrollOffset = 0;
-        //        if (m_logScrollOffset > maxOffset) m_logScrollOffset = maxOffset;
-        //    }
-        //}int wheel = GetMouseWheelRotVol();
+        int wheel = GetMouseWheelRotVol();
         if (wheel != 0 && m_ui) {
-            Vector2 mPos = input.GetMousePos();
-            // 全て UI クラスの ScrollLog 関数にお任せする
-            m_ui->ScrollLog(wheel, mPos.x, mPos.y);
+            Vector2 mousePos = input.GetMousePos();
+            m_ui->ScrollLog(wheel, mousePos.x, mousePos.y);
         }
 
         m_shaderTime += 0.0016f + (0.01f * m_effectIntensity);
@@ -469,23 +537,34 @@ namespace App {
 
         switch (m_currentPhase) {
         case Phase::P1_Move:
+            if (m_player) {
+                ReserveOperatorUpkeepIfNeeded(*m_player, true);
+            }
+
             if (m_is1P_NPC) {
                 if (!m_playerAIStarted) { ExecuteAI(m_player.get(), m_enemy.get(), true); m_playerAIStarted = true; }
                 else if (m_player && !m_player->IsMoving()) m_currentPhase = Phase::P1_Action;
             }
             else HandleMoveInput(*m_player, Phase::P1_Action);
             break;
+
         case Phase::P1_Action:
             if (m_is1P_NPC) ExecuteAIAction(m_player.get(), m_enemy.get(), true);
             else HandleActionInput(*m_player, *m_enemy);
             break;
+
         case Phase::P2_Move:
+            if (m_enemy) {
+                ReserveOperatorUpkeepIfNeeded(*m_enemy, false);
+            }
+
             if (m_is2P_NPC) {
                 if (!m_enemyAIStarted) { ExecuteAI(m_enemy.get(), m_player.get(), false); m_enemyAIStarted = true; }
                 else if (m_enemy && !m_enemy->IsMoving()) m_currentPhase = Phase::P2_Action;
             }
             else HandleMoveInput(*m_enemy, Phase::P2_Action);
             break;
+
         case Phase::P2_Action:
             if (m_is2P_NPC) ExecuteAIAction(m_enemy.get(), m_player.get(), false);
             else HandleActionInput(*m_enemy, *m_player);
@@ -535,7 +614,7 @@ namespace App {
         else {
             if (is1P) g_aiStayCount1P = 0; else g_aiStayCount2P = 0;
         }
-     
+
         int actualCost = isStay ? 1 : selectedCost;
         if (me->HasWarpNode(bestTarget)) actualCost = 1;
 
@@ -570,7 +649,7 @@ namespace App {
                 screenPath.push(m_mapGrid.GetCellCenter(curr.x, curr.y));
             }
         }
-        me->AddNumber(-actualCost);
+        AddPowerWithBattery(*me, -actualCost, "移動");
         me->StartMove(bestTarget, screenPath);
 
         if (is1P) m_playerAIStarted = true; else m_enemyAIStarted = true;
@@ -736,9 +815,23 @@ namespace App {
                     }
                     else {
                         auto calcDmg = [](int currentHp, int currentStocks, int val, int& outHp, int& outStocks) {
-                            outHp = currentHp + val; outStocks = currentStocks;
-                            while (outHp <= 0) { outStocks--; outHp += 9; }
-                            while (outHp > 9) { outStocks++; outHp -= 9; }
+                            (void)currentHp;
+
+                            outHp = val;
+                            outStocks = currentStocks;
+
+                            if (outHp <= 0) {
+                                outStocks -= 1;
+                                while (outHp <= 0) {
+                                    outHp += 9;
+                                }
+                            }
+                            else if (outHp > 9) {
+                                outStocks += 1;
+                                while (outHp > 9) {
+                                    outHp -= 9;
+                                }
+                            }
                             };
 
                         int myHpNext, myStNext, enHpNext, enStNext;
@@ -875,10 +968,13 @@ namespace App {
     // 反映結果のログ出力
     // ==========================================
     void BattleMaster::ApplyBattleResult(UnitBase& unit, const Fraction& resultFrac, int intRes, char op) {
+        (void)resultFrac; // カウントルール用（ノーマルバトルでは未使用の警告除け）
         std::string targetName = (&unit == m_player.get()) ? "1P" : "2P";
 
-
-        if (m_ruleMode == RuleMode::ZERO_ONE) {// カウントバトル
+        if (m_ruleMode == RuleMode::ZERO_ONE) {
+            // ==========================================
+            // カウントバトルの処理（スコア制）
+            // ==========================================
             Fraction& currentScore = (&unit == m_player.get()) ? m_p1ZeroOneScore : m_p2ZeroOneScore;
             Fraction goalScore(m_targetScore);
 
@@ -911,45 +1007,57 @@ namespace App {
             int finalNum = cycleValue + 1;
 
             AddLog("【反映】 " + targetName + " のパワーが [" + std::to_string(finalNum) + "] に再設定されました。");
-
             unit.SetNumber(finalNum);
             ProceduralAudio::GetInstance().PlayPowerSE(finalNum);
         }
-        else { // ノーマルバトル
+        else {
+            // ==========================================
+            // ノーマルバトルの処理（完全書き換え式）
+            // ==========================================
             if (op != '/') {
-                int currentHp = unit.GetNumber();
-                int newHpRaw = currentHp + intRes;
+                int newPower = intRes; // 現在のパワーは無視して、計算結果で上書き
                 int stockChange = 0;
 
-                while (newHpRaw <= 0) { stockChange--; newHpRaw += 9; }
-                while (newHpRaw > 9) { stockChange++; newHpRaw -= 9; }
+                // 橋本さんのロジック「18 = バッテリー2・パワー0 -> バッテリー1・パワー9」を
+                // whileループで正確にシミュレート（繰り上がり・繰り下がり処理）
+                while (newPower <= 0) {
+                    stockChange--;
+                    newPower += 9;
+                }
+                while (newPower > 9) {
+                    stockChange++;
+                    newPower -= 9;
+                }
 
+                // 3. バッテリーの増減と死亡判定
                 if (stockChange < 0) {
+                    // ★即死判定：現在のストック数より、マイナスされる量の方が多ければ死亡
+                    if (unit.GetStocks() + stockChange < 0) {
+                        SetClassicDefeat(unit, "エネルギー枯渇");
+                        ProceduralAudio::GetInstance().PlayErrorSE();
+                        return;
+                    }
                     unit.AddStocks(stockChange);
-                    AddLog("【反映】 " + targetName + " に攻撃！バッテリーが " + std::to_string(std::abs(stockChange)) + " 破壊！");
+                    AddLog("【負荷】 " + targetName + " のバッテリーが " + std::to_string(std::abs(stockChange)) + " 減少！");
                     ProceduralAudio::GetInstance().PlayErrorSE();
                 }
                 else if (stockChange > 0) {
                     unit.AddStocks(stockChange);
-                    AddLog("【反映】 " + targetName + " がバッテリーを " + std::to_string(stockChange) + " つ過剰(回復)！");
+                    AddLog("【充電】 " + targetName + " のバッテリーが " + std::to_string(stockChange) + " 回復！");
                     ProceduralAudio::GetInstance().PlayPowerSE(8);
                 }
                 else {
-                    AddLog("【反映】 " + targetName + " のパワーに適用");
+                    AddLog("【適用】 " + targetName + " の数値を書き換え");
                 }
 
-                unit.SetNumber(newHpRaw);
+                // 計算された最終的なパワー（1〜9）をセット
+                unit.SetNumber(newPower);
 
-                int soundNum = newHpRaw;
-                while (soundNum <= 0) { soundNum += 9; }
-                while (soundNum > 9) { soundNum -= 9; }
-
-                AddLog("【着地】 " + targetName + " のパワーは [" + std::to_string(soundNum) + "] に");
-                ProceduralAudio::GetInstance().PlayPowerSE(soundNum);
+                AddLog("【着地】 " + targetName + " のパワーは [" + std::to_string(newPower) + "] に変更されました");
+                ProceduralAudio::GetInstance().PlayPowerSE(newPower);
             }
         }
     }
-
     void BattleMaster::Draw() const {
         if (m_ui) {
             m_ui->Draw(*this);
@@ -958,28 +1066,61 @@ namespace App {
 
     bool BattleMaster::IsGameOver() const {
         if (!m_player || !m_enemy) return false;
+
         if (m_ruleMode == RuleMode::ZERO_ONE) {
             Fraction goal(m_targetScore);
             return (m_p1ZeroOneScore == goal || m_p2ZeroOneScore == goal);
         }
-        if (m_player->GetStocks() <= 0 && m_player->GetNumber() <= 0) return true;
-        if (m_enemy->GetStocks() <= 0 && m_enemy->GetNumber() <= 0) return true;
-        return false;
+        else {
+            return m_isBattleFinished;
+        }
     }
-
     bool BattleMaster::IsPlayerWin() const {
         if (!m_player || !m_enemy) return false;
+
         if (m_ruleMode == RuleMode::ZERO_ONE) {
             Fraction goal(m_targetScore);
             return (m_p1ZeroOneScore == goal);
         }
         else {
-            return (m_enemy->GetStocks() <= 0 && m_enemy->GetNumber() <= 0);
+            return m_is1PWinner;
         }
     }
-
     bool BattleMaster::CheckButtonClick(int x, int y, int w, int h, const Vector2& mousePos) const {
         return (mousePos.x >= static_cast<float>(x) && mousePos.x <= static_cast<float>(x + w) &&
             mousePos.y >= static_cast<float>(y) && mousePos.y <= static_cast<float>(y + h));
+    }
+
+    void BattleMaster::AddPowerWithBattery(UnitBase& unit, int delta, const std::string& reason) {
+        std::string targetName = (&unit == m_player.get()) ? "1P" : "2P";
+
+        int rawPower = unit.GetNumber() + delta;
+
+        if (rawPower <= 0) {
+            // ★ここが重要：バッテリー0なら、9に戻さず敗北確定
+            if (unit.GetStocks() <= 0) {
+                SetClassicDefeat(unit, reason);
+                return;
+            }
+
+            unit.AddStocks(-1);
+
+            while (rawPower <= 0) {
+                rawPower += 9;
+            }
+
+            AddLog("【消費】 " + targetName + " は " + reason + " によりバッテリーを 1 消費！");
+        }
+        else if (rawPower > 9) {
+            unit.AddStocks(1);
+
+            while (rawPower > 9) {
+                rawPower -= 9;
+            }
+
+            AddLog("【充電】 " + targetName + " は " + reason + " によりバッテリーを 1 回復！");
+        }
+
+        unit.SetNumber(rawPower);
     }
 } // namespace App
