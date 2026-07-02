@@ -44,7 +44,9 @@ namespace App {
         enum class NetSetupStep {
             SELECT_ROLE,      // ホストになるか、クライアントになるか
             HOST_WAITING,     // ホストとして待機中（UDP送信中）
-            CLIENT_SEARCHING  // クライアントとして部屋を検索中（UDP受信中）
+            CLIENT_SEARCHING,  // クライアントとして部屋を検索中（UDP受信中）
+            CLIENT_WAIT_SETUP
+
         };
 
         TitleScene();

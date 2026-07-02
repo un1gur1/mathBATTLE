@@ -264,14 +264,19 @@ namespace App {
                     NetworkManager::GetInstance()->Disconnect();
                     m_netStep = NetSetupStep::SELECT_ROLE;
                 }
-                // もし相手が接続してきたら！
+                // ★ 修正：ホストのマッチング成功時
                 if (NetworkManager::GetInstance()->GetState() == NetworkManager::State::CONNECTED) {
-                    ProceduralAudio::GetInstance().PlayPowerSE(9); // マッチング成功音
-                    // ※TODO: ゆくゆくはここで通信対戦用のフラグを立ててから GAME シーンへ行く
-                    SceneManager::GetInstance()->ChangeScene(SceneManager::SCENE_ID::GAME);
+                    ProceduralAudio::GetInstance().PlayPowerSE(9);
+
+                    // ホストはゲーム設定画面へ！(プレイヤー人数選択は飛ばしてモード選択へ)
+                    m_titleState = TitleState::BATTLE_SETUP;
+                    m_setupStep = SetupStep::SELECT_MODE;
+
+                    // オンラインなので強制的に対人戦設定
+                    m_players[0].typeCursor = 0; // 1Pはプレイヤー
+                    m_players[1].typeCursor = 0; // 2Pもプレイヤー(通信相手)
                 }
                 break;
-
             case NetSetupStep::CLIENT_SEARCHING:
             {
                 auto hosts = NetworkManager::GetInstance()->GetHostList();
@@ -291,16 +296,46 @@ namespace App {
                     NetworkManager::GetInstance()->ConnectToHost(hosts[m_hostListCursor].ip);
                 }
 
-                // もし接続に成功したら！
-                if (NetworkManager::GetInstance()->GetState() == NetworkManager::State::CONNECTED) {
-                    ProceduralAudio::GetInstance().PlayPowerSE(9); // マッチング成功音
-                    SceneManager::GetInstance()->ChangeScene(SceneManager::SCENE_ID::GAME);
+              if (NetworkManager::GetInstance()->GetState() == NetworkManager::State::CONNECTED) {
+                    ProceduralAudio::GetInstance().PlayPowerSE(9);
+                    // クライアントはホストの設定完了を待つステートへ！
+                    m_netStep = NetSetupStep::CLIENT_WAIT_SETUP; 
                 }
                 break;
             }
+            break;
+        case NetSetupStep::CLIENT_WAIT_SETUP:
+        {
+            SetupPacket packet;
+            // パケットが届いたか監視する
+            if (NetworkManager::GetInstance()->ReceiveSetupPacket(packet)) {
+                ProceduralAudio::GetInstance().PlayPowerSE(9);
+
+                // 届いたデータを SceneManager にそっくりそのまま登録！
+                auto* sm = SceneManager::GetInstance();
+
+                // モードとスコア/残機の登録
+                if (packet.modeCursor == 0) {
+                    int maxStocks = (packet.stocksCursor == 0) ? 1 : (packet.stocksCursor == 1) ? 3 : 5;
+                    sm->SetGameSettings(2, packet.modeCursor, maxStocks); // 通信なので強制2P
+                }
+                else {
+                    int finalScore = TARGET_SCORES[packet.scoreCursor];
+                    sm->SetGameSettings(2, packet.modeCursor, finalScore);
+                }
+
+                // 座標と初期パワーの登録 (引数の数と型を確実に合わせる)
+                sm->SetPlayer1Settings(false, packet.p1StartNum, packet.p1StartX - 1, GRID_SIZE - packet.p1StartY);
+                sm->SetPlayer2Settings(false, packet.p2StartNum, packet.p2StartX - 1, GRID_SIZE - packet.p2StartY);
+                sm->SetStageIndex(packet.stageCursor);
+
+                // 準備完了！ゲーム画面へ遷移
+                sm->ChangeScene(SceneManager::SCENE_ID::GAME);
             }
             break;
-
+        }
+            }
+            break;
         case TitleState::OPTION_MENU:
             if (bTrg || isBackBtnClicked || spaceTrg) {
                 ProceduralAudio::GetInstance().PlayErrorSE();
@@ -484,7 +519,6 @@ namespace App {
                         m_players[0].customCursor = 3;
                     }
                 }
-
                 if (spaceTrg) {
                     ProceduralAudio::GetInstance().PlayPowerSE(9);
                     if (p.customCursor < 3) p.customCursor++;
@@ -495,6 +529,28 @@ namespace App {
                         }
                         else {
                             auto* sm = SceneManager::GetInstance();
+
+                            // ★ 修正：もしオンライン対戦のホストだったら、クライアントに設定データを送信する！
+                            if (NetworkManager::GetInstance()->GetState() == NetworkManager::State::CONNECTED &&
+                                NetworkManager::GetInstance()->IsHost()) {
+
+                                SetupPacket packet;
+                                packet.modeCursor = m_modeCursor;
+                                packet.stocksCursor = m_stocksCursor;
+                                packet.scoreCursor = m_scoreCursor;
+                                packet.stageCursor = m_stageCursor;
+                                packet.p1StartNum = m_players[0].startNum;
+                                packet.p1StartX = m_players[0].startX;
+                                packet.p1StartY = m_players[0].startY;
+                                packet.p2StartNum = m_players[1].startNum;
+                                packet.p2StartX = m_players[1].startX;
+                                packet.p2StartY = m_players[1].startY;
+
+                                // 送信！
+                                NetworkManager::GetInstance()->SendSetupPacket(packet);
+                            }
+
+                            // いつも通りのSceneManagerへの登録処理
                             if (m_modeCursor == 0) {
                                 int maxStocks = (m_stocksCursor == 0) ? 1 : (m_stocksCursor == 1) ? 3 : 5;
                                 sm->SetGameSettings(m_playerCursor, m_modeCursor, maxStocks);
@@ -503,22 +559,17 @@ namespace App {
                                 int finalScore = TARGET_SCORES[m_scoreCursor];
                                 sm->SetGameSettings(m_playerCursor, m_modeCursor, finalScore);
                             }
-
-                            sm->SetPlayer1Settings(
-                                m_players[0].typeCursor == 1, m_players[0].startNum,
-                                m_players[0].startX - 1, GRID_SIZE - m_players[0].startY
-                            );
-                            sm->SetPlayer2Settings(
-                                m_players[1].typeCursor == 1, m_players[1].startNum,
-                                m_players[1].startX - 1, GRID_SIZE - m_players[1].startY
-                            );
+                            sm->SetPlayer1Settings(m_players[0].typeCursor == 1, m_players[0].startNum, m_players[0].startX - 1, GRID_SIZE - m_players[0].startY);
+                            sm->SetPlayer2Settings(m_players[1].typeCursor == 1, m_players[1].startNum, m_players[1].startX - 1, GRID_SIZE - m_players[1].startY);
                             sm->SetStageIndex(m_stageCursor);
+
                             sm->ChangeScene(SceneManager::SCENE_ID::GAME);
                         }
                     }
                 }
                 break;
-            } // End Case Custom
+            }
+               
             } // End switch(m_setupStep)
             break; // End BATTLE_SETUP
 
@@ -679,6 +730,13 @@ namespace App {
             // ==========================================
         case TitleState::NETWORK_SETUP:
             switch (m_netStep) {
+            case NetSetupStep::CLIENT_WAIT_SETUP: // ★追加
+            {
+                const char* msg = "ホストがゲームルールを設定中です...";
+                int msgW = GetDrawStringWidthToHandle(msg, (int)strlen(msg), m_fontMenu);
+                DrawStringToHandle(CX - msgW / 2, CY, msg, COL_TEXT_SUB(), m_fontMenu);
+                break;
+            }
             case NetSetupStep::SELECT_ROLE:
                 drawMenuList(m_netRoleCursor, "【 通信対戦 】", { "部屋を作る (ホスト)", "部屋を探す (クライアント)" });
                 break;

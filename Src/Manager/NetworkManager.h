@@ -11,8 +11,35 @@ namespace App {
         IPDATA ip;
         std::string ipString;
         std::string playerName;
-        int lastPingTime; // タイムアウト（リストから消す）判定用
+        int lastPingTime; // タイムアウト判定用
     };
+
+    // ==========================================
+    // バトル設定パケット（ホストからクライアントへ送るデータ）
+    // ==========================================
+    struct SetupPacket {
+        int modeCursor;    // 0=クラシック, 1=ゼロワン
+        int stocksCursor;  // 残機 (0, 1, 2)
+        int scoreCursor;   // 目標スコア (0, 1, 2)
+        int stageCursor;   // ステージ (0, 1, 2)
+        int p1StartNum; int p1StartX; int p1StartY; // 1P初期設定
+        int p2StartNum; int p2StartX; int p2StartY; // 2P初期設定
+    };
+
+    // ==========================================
+    // バトル用パケット（ターンごとに送受信するデータ）
+    // ==========================================
+    enum class NetAction {
+        MOVE,   // 移動フェーズでの操作
+        ACTION  // 行動（攻撃・待機）フェーズでの操作
+    };
+
+    struct BattlePacket {
+        NetAction actionType;
+        int targetX;  // クリックしたX座標
+        int targetY;  // クリックしたY座標
+    };
+
 
     // ==========================================
     // NetworkManager: 通信マッチングと送受信を管理するシングルトン
@@ -27,6 +54,7 @@ namespace App {
             CONNECTED           // TCP接続完了（バトル中）
         };
 
+        // シングルトン用関数
         static void CreateInstance();
         static NetworkManager* GetInstance();
         static void DeleteInstance();
@@ -38,26 +66,27 @@ namespace App {
         // ------------------------------------------
         // マッチング用関数
         // ------------------------------------------
-        // [ホスト側] 名前をつけて部屋を立てる
         bool StartHost(const std::string& playerName);
-
-        // [クライアント側] 部屋の検索を開始する
         bool StartSearch();
-
-        // [クライアント側] 見つけたホストの一覧を取得する
         std::vector<HostInfo> GetHostList() const;
-
-        // [クライアント側] 選択したホストにTCP接続する
         bool ConnectToHost(IPDATA targetIP);
-
-        // 通信を切断し、オフラインに戻る
         void Disconnect();
 
-        // 現在の状態を取得
+        // 状態取得
         State GetState() const { return m_state; }
-
-        // 相手の名前を取得
         std::string GetOpponentName() const { return m_oppName; }
+
+        // 自分がホスト（部屋を立てた側）かどうか
+        bool IsHost() const { return m_isHost; }
+
+        // ------------------------------------------
+        // パケットの送受信関数
+        // ------------------------------------------
+        void SendSetupPacket(const SetupPacket& packet);
+        bool ReceiveSetupPacket(SetupPacket& outPacket);
+
+        void SendBattlePacket(const BattlePacket& packet);
+        bool ReceiveBattlePacket(BattlePacket& outPacket);
 
     private:
         NetworkManager();
@@ -66,24 +95,23 @@ namespace App {
         static NetworkManager* s_instance;
 
         // 定数群
-        static constexpr int TCP_PORT = 54321; // バトル用TCPポート
-        static constexpr int UDP_PORT = 54322; // マッチング用UDPポート
-        static constexpr int BROADCAST_INTERVAL = 60; // UDP送信間隔（フレーム）
-        static constexpr int HOST_TIMEOUT_MS = 3000;  // 3秒UDPが来なければリストから消す
+        static constexpr int TCP_PORT = 54321;
+        static constexpr int UDP_PORT = 54322;
+        static constexpr int BROADCAST_INTERVAL = 60;
+        static constexpr int HOST_TIMEOUT_MS = 3000;
 
         State m_state;
         std::string m_myName;
         std::string m_oppName;
 
-        int m_tcpHandle; // TCP通信のハンドル
-        int m_udpSocket; // UDP検索/送信のソケット
+        int m_tcpHandle;
+        int m_udpSocket;
+        int m_broadcastTimer;
 
-        int m_broadcastTimer; // UDP送信のタイマー
+        bool m_isHost;
 
-        // 見つけたホストのリスト (IPアドレス文字列をキーにする)
         std::unordered_map<std::string, HostInfo> m_hostList;
 
-        // ヘルパー関数
         std::string IpToString(IPDATA ip) const;
     };
 

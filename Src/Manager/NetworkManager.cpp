@@ -122,7 +122,7 @@ namespace App {
         Disconnect(); // まずリセット
 
         m_myName = playerName;
-
+        m_isHost = true;
         // 1. 本番のバトル用(TCP)の接続待ちを開始
         if (PreparationListenNetWork(TCP_PORT) == -1) {
             return false; // エラー
@@ -144,6 +144,7 @@ namespace App {
     bool NetworkManager::StartSearch() {
         Disconnect();
 
+        m_isHost = false;
         // 受信専用のUDPソケットを作る（ホストが送信してくるUDP_PORTを指定して待つ）
         m_udpSocket = MakeUDPSocket(UDP_PORT);
         if (m_udpSocket == -1) {
@@ -207,6 +208,45 @@ namespace App {
     std::string NetworkManager::IpToString(IPDATA ip) const {
         return std::to_string(ip.d1) + "." + std::to_string(ip.d2) + "." +
             std::to_string(ip.d3) + "." + std::to_string(ip.d4);
+    }
+
+    void NetworkManager::SendSetupPacket(const SetupPacket& packet) {
+        if (m_state != State::CONNECTED || m_tcpHandle == -1) return;
+        // 構造体をそのままバイトデータとして送信
+        NetWorkSend(m_tcpHandle, &packet, sizeof(SetupPacket));
+    }
+
+    // クライアントが設定データを受け取る
+    bool NetworkManager::ReceiveSetupPacket(SetupPacket& outPacket) {
+        if (m_state != State::CONNECTED || m_tcpHandle == -1) return false;
+
+        // データが届いているか確認（届いていなければ 0 が返る）
+        int dataSize = GetNetWorkDataLength(m_tcpHandle);
+        if (dataSize >= sizeof(SetupPacket)) {
+            // 届いていたら受け取る
+            NetWorkRecv(m_tcpHandle, &outPacket, sizeof(SetupPacket));
+            return true;
+        }
+        return false;
+
+    }
+
+    // バトル中の行動データを送信する
+    void NetworkManager::SendBattlePacket(const BattlePacket& packet) {
+        if (m_state != State::CONNECTED || m_tcpHandle == -1) return;
+        NetWorkSend(m_tcpHandle, &packet, sizeof(BattlePacket));
+    }
+
+    // バトル中の行動データを受信する
+    bool NetworkManager::ReceiveBattlePacket(BattlePacket& outPacket) {
+        if (m_state != State::CONNECTED || m_tcpHandle == -1) return false;
+
+        int dataSize = GetNetWorkDataLength(m_tcpHandle);
+        if (dataSize >= sizeof(BattlePacket)) {
+            NetWorkRecv(m_tcpHandle, &outPacket, sizeof(BattlePacket));
+            return true;
+        }
+        return false;
     }
 
 } // namespace App

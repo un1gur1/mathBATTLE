@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include "../Input/InputManager.h"
 #include "../Scene/SceneManager.h" 
+#include "NetworkManager.h" 
 #include "../Battle/BattleUI.h"
 #include "../../CyberGrid.h" 
 #include "ProceduralAudio.h"
@@ -46,9 +47,6 @@ namespace {
 
     std::mt19937 g_rng(std::random_device{}());
 
-    // ========================================================
-    // 超絶軽量化の要：フォントキャッシュシステム！
-    // ========================================================
     int GetCachedFont(int size) {
         static std::unordered_map<int, int> s_fontCache;
         if (s_fontCache.find(size) == s_fontCache.end()) {
@@ -245,22 +243,71 @@ namespace App {
         return false;
     }
 
+    // ==========================================
+    // ★ 修正: 通信対応の移動処理
+    // ==========================================
     void BattleMaster::HandleMoveInput(UnitBase& activeUnit, Phase nextPhase) {
         if (activeUnit.IsMoving()) return;
-        auto& input = InputManager::GetInstance();
-        if (!input.IsMouseLeftTrg()) return;
 
+        bool isClick = false;
+        Vector2 mousePos;
+
+        // 通信対戦の判定（自分が操作できるターンか？）
+        bool isOnline = (NetworkManager::GetInstance() != nullptr && NetworkManager::GetInstance()->GetState() == NetworkManager::State::CONNECTED);
+        bool isMyTurn = true;
+        if (isOnline) {
+            bool isHost = NetworkManager::GetInstance()->IsHost();
+            isMyTurn = (Is1PTurn() == isHost);
+        }
+
+        if (isOnline) {
+            if (isMyTurn) {
+                // 自分のターン：普通にマウス入力を受け取り、クリックされたら送信！
+                auto& input = InputManager::GetInstance();
+                if (input.IsMouseLeftTrg()) {
+                    isClick = true;
+                    mousePos = input.GetMousePos();
+
+                    BattlePacket packet;
+                    packet.actionType = NetAction::MOVE;
+                    packet.targetX = (int)mousePos.x;
+                    packet.targetY = (int)mousePos.y;
+                    NetworkManager::GetInstance()->SendBattlePacket(packet);
+                }
+            }
+            else {
+                // 相手のターン：マウス入力は無効化し、パケットが届くのを待つ！
+                BattlePacket packet;
+                if (NetworkManager::GetInstance()->ReceiveBattlePacket(packet)) {
+                    isClick = true;
+                    mousePos = Vector2((float)packet.targetX, (float)packet.targetY);
+                }
+            }
+        }
+        else {
+            // オフライン（ローカル）
+            auto& input = InputManager::GetInstance();
+            if (input.IsMouseLeftTrg()) {
+                isClick = true;
+                mousePos = input.GetMousePos();
+            }
+        }
+
+        // 誰もクリックしていない(またはパケットが届いていない)なら何もしない
+        if (!isClick) return;
+
+        IntVector2 targetGrid = m_mapGrid.ScreenToGrid(mousePos);
         IntVector2 pos = activeUnit.GetGridPos();
 
         if (!m_isPlayerSelected) {
-            if (m_hoverGrid == pos) {
+            if (targetGrid == pos) {
                 m_isPlayerSelected = true;
                 ProceduralAudio::GetInstance().PlayPowerSE(3);
             }
             return;
         }
 
-        if (m_hoverGrid == pos) {
+        if (targetGrid == pos) {
             AddPowerWithBattery(activeUnit, -1, "待機");
             m_isPlayerSelected = false;
             m_currentPhase = nextPhase;
@@ -269,34 +316,30 @@ namespace App {
         }
 
         int cost = 0;
-        if (!m_mapGrid.IsWithinBounds(m_hoverGrid.x, m_hoverGrid.y) ||
-            !CanMove(activeUnit.GetNumber(), activeUnit.GetOp(), pos, m_hoverGrid, cost)) {
+        if (!m_mapGrid.IsWithinBounds(targetGrid.x, targetGrid.y) ||
+            !CanMove(activeUnit.GetNumber(), activeUnit.GetOp(), pos, targetGrid, cost)) {
             m_isPlayerSelected = false;
             ProceduralAudio::GetInstance().PlayErrorSE();
             return;
         }
 
-        // ==========================================
-          // プレイヤー移動時のログ出力(HandleMoveInput内)
-          // ==========================================
         ProceduralAudio::GetInstance().PlayPowerSE(5);
         AddPowerWithBattery(activeUnit, -cost, "移動");
         std::queue<Vector2> autoPath;
-        int dx = std::abs(m_hoverGrid.x - pos.x);
-        int dy = std::abs(m_hoverGrid.y - pos.y);
+        int dx = std::abs(targetGrid.x - pos.x);
+        int dy = std::abs(targetGrid.y - pos.y);
         m_totalMoves += std::max(dx, dy);
 
         std::string myName = Is1PTurn() ? "1P" : "2P";
 
-        if (activeUnit.HasWarpNode(m_hoverGrid) || (dx != dy && dx != 0 && dy != 0)) {
-            autoPath.push(m_mapGrid.GetCellCenter(m_hoverGrid.x, m_hoverGrid.y));
-            //詳細ログ
-            AddLog("【跳躍】 " + myName + " が (" + std::to_string(pos.x + 1) + "," + std::to_string(9 - pos.y) + ") から (" + std::to_string(m_hoverGrid.x + 1) + "," + std::to_string(9 - m_hoverGrid.y) + ") へワープ！ (パワー -1)");
+        if (activeUnit.HasWarpNode(targetGrid) || (dx != dy && dx != 0 && dy != 0)) {
+            autoPath.push(m_mapGrid.GetCellCenter(targetGrid.x, targetGrid.y));
+            AddLog("【跳躍】 " + myName + " が (" + std::to_string(pos.x + 1) + "," + std::to_string(9 - pos.y) + ") から (" + std::to_string(targetGrid.x + 1) + "," + std::to_string(9 - targetGrid.y) + ") へワープ！ (パワー -1)");
             ProceduralAudio::GetInstance().PlayPowerSE(8);
         }
         else {
-            int stepX = (m_hoverGrid.x > pos.x) ? 1 : (m_hoverGrid.x < pos.x) ? -1 : 0;
-            int stepY = (m_hoverGrid.y > pos.y) ? 1 : (m_hoverGrid.y < pos.y) ? -1 : 0;
+            int stepX = (targetGrid.x > pos.x) ? 1 : (targetGrid.x < pos.x) ? -1 : 0;
+            int stepY = (targetGrid.y > pos.y) ? 1 : (targetGrid.y < pos.y) ? -1 : 0;
             IntVector2 curr = pos;
             int maxSteps = std::max(dx, dy);
             for (int i = 0; i < maxSteps; ++i) {
@@ -305,14 +348,17 @@ namespace App {
                 autoPath.push(m_mapGrid.GetCellCenter(curr.x, curr.y));
             }
 
-            AddLog("【移動】 " + myName + " が (" + std::to_string(m_hoverGrid.x + 1) + "," + std::to_string(9 - m_hoverGrid.y) + ") へ移動(パワー -" + std::to_string(cost) + ")");
+            AddLog("【移動】 " + myName + " が (" + std::to_string(targetGrid.x + 1) + "," + std::to_string(9 - targetGrid.y) + ") へ移動(パワー -" + std::to_string(cost) + ")");
         }
 
-        activeUnit.StartMove(m_hoverGrid, autoPath);
+        activeUnit.StartMove(targetGrid, autoPath);
         m_isPlayerSelected = false;
         m_currentPhase = nextPhase;
     }
 
+    // ==========================================
+    // ★ 修正: 通信対応の攻撃・反映フェーズ
+    // ==========================================
     void BattleMaster::HandleActionInput(UnitBase& actor, UnitBase& targetUnit) {
         if (actor.IsMoving()) return;
 
@@ -342,10 +388,52 @@ namespace App {
             return;
         }
 
-        auto& input = InputManager::GetInstance();
-        if (!input.IsMouseLeftTrg()) return;
+        bool isClick = false;
+        Vector2 mousePos;
 
-        Vector2 mousePos = input.GetMousePos();
+        // 通信対戦の判定
+        bool isOnline = (NetworkManager::GetInstance() != nullptr && NetworkManager::GetInstance()->GetState() == NetworkManager::State::CONNECTED);
+        bool isMyTurn = true;
+        if (isOnline) {
+            bool isHost = NetworkManager::GetInstance()->IsHost();
+            isMyTurn = (is1P == isHost);
+        }
+
+        if (isOnline) {
+            if (isMyTurn) {
+                // 自分のターン
+                auto& input = InputManager::GetInstance();
+                if (input.IsMouseLeftTrg()) {
+                    isClick = true;
+                    mousePos = input.GetMousePos();
+
+                    BattlePacket packet;
+                    packet.actionType = NetAction::ACTION;
+                    packet.targetX = (int)mousePos.x;
+                    packet.targetY = (int)mousePos.y;
+                    NetworkManager::GetInstance()->SendBattlePacket(packet);
+                }
+            }
+            else {
+                // 相手のターン
+                BattlePacket packet;
+                if (NetworkManager::GetInstance()->ReceiveBattlePacket(packet)) {
+                    isClick = true;
+                    mousePos = Vector2((float)packet.targetX, (float)packet.targetY);
+                }
+            }
+        }
+        else {
+            // オフライン
+            auto& input = InputManager::GetInstance();
+            if (input.IsMouseLeftTrg()) {
+                isClick = true;
+                mousePos = input.GetMousePos();
+            }
+        }
+
+        if (!isClick) return;
+
         IntVector2 hoverGrid = m_mapGrid.ScreenToGrid(mousePos);
         bool actionDone = false;
 
@@ -570,6 +658,7 @@ namespace App {
             else HandleActionInput(*m_enemy, *m_player);
             break;
         }
+
         // ==========================================
         // 右上のPAUSEボタンのホバー・クリック判定
         // ==========================================
@@ -590,7 +679,6 @@ namespace App {
                 return; // 即閉じ防止のためUpdateを抜ける
             }
         }
-
 
         if (IsGameOver() && m_currentPhase != Phase::FINISH) {
             m_currentPhase = Phase::FINISH;
