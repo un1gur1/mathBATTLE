@@ -9,6 +9,7 @@ namespace App {
     class GameScene;
     class TitleScene;
     class ResultScene;
+	class TutorialScene;
     class PauseMenu;
 
     // ==========================================
@@ -36,6 +37,7 @@ namespace App {
         enum class SCENE_ID {
             NONE,      // シーンなし
             TITLE,     // タイトル画面
+            TUTORIAL,
             GAME,      // ゲーム本編
             RESULT     // リザルト画面
         };
@@ -123,6 +125,10 @@ namespace App {
         bool GetLastIsWin() const { return m_lastIsWin; }              // 勝利したか
         const BattleStats& GetLastStats() const { return m_lastStats; } // 戦績データ
 
+        // ゲーム終了フラグを設定する
+        void SetGameEnd(bool isEnd);
+        bool IsGameEnd() const;
+
     private:
         // ==========================================
         // シングルトン: コピー・ムーブ禁止
@@ -191,6 +197,11 @@ namespace App {
         // ==========================================
         bool m_lastIsWin;           // 前回の勝敗
         BattleStats m_lastStats;    // 前回の戦績
+
+        // ==========================================
+        // ゲーム終了フラグ
+        // ==========================================
+        bool m_gameEnd = false;     // ゲーム終了フラグ
     };
 
 } // namespace App

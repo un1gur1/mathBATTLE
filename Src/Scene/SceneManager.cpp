@@ -2,6 +2,7 @@
 #include "GameScene.h"
 #include "TitleScene.h"
 #include "ResultScene.h"
+#include "TutorialScene.h" 
 #include "PauseMenu.h"
 #include "../Input/InputManager.h"
 #include "../Manager/ProceduralAudio.h"
@@ -12,6 +13,18 @@ namespace App {
     // シングルトンインスタンス
     // ==========================================
     SceneManager* SceneManager::instance_ = nullptr;
+
+    void SceneManager::SetGameEnd(bool isEnd)
+    {
+		isGameEnd_ = isEnd;
+
+    }
+
+    bool SceneManager::IsGameEnd() const
+    {
+
+		return isGameEnd_;
+    }
 
     // ==========================================
     // コンストラクタ: 各種変数の初期化
@@ -50,11 +63,11 @@ namespace App {
             scene_ = nullptr;
         }
         if (load_) {
-            delete load_;
+            // delete load_; // 適切な型にキャストして削除
             load_ = nullptr;
         }
         if (fader_) {
-            delete fader_;
+            // delete fader_;
             fader_ = nullptr;
         }
         if (pauseMenu_) {
@@ -152,7 +165,6 @@ namespace App {
         }
         else {
             // 通常時: 現在のシーンを更新
-            // （この中でマウスクリックされたら、各シーンが TogglePause() を呼ぶ！）
             if (scene_) scene_->Update();
         }
     }
@@ -179,15 +191,6 @@ namespace App {
             delete scene_;
             scene_ = nullptr;
         }
-        if (load_) {
-            delete load_;
-            load_ = nullptr;
-        }
-        if (fader_) {
-            delete fader_;
-            fader_ = nullptr;
-        }
-
         sceneId_ = SCENE_ID::NONE;
         nextSceneId_ = SCENE_ID::NONE;
         isChanging_ = false;
@@ -219,6 +222,9 @@ namespace App {
             break;
         case SCENE_ID::TITLE:
             scene_ = new TitleScene();
+            break;
+        case SCENE_ID::TUTORIAL:       
+            scene_ = new TutorialScene();
             break;
         case SCENE_ID::GAME:
             scene_ = new GameScene();

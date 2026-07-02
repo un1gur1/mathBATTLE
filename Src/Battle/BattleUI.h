@@ -1,5 +1,4 @@
 #pragma once
-#include <DxLib.h>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -7,6 +6,7 @@
 namespace App {
 
     class BattleMaster; // 相互参照を防ぐための前方宣言
+	class TutorialMaster; // チュートリアル専用のマスタークラス
 
     // ==========================================
     // BattleUI: バトル画面の描画と演出を「専属」で担当するクラス
@@ -24,6 +24,8 @@ namespace App {
         // メイン描画関数。Master自身のデータ（const参照）を受け取って描画する
         void Draw(const BattleMaster& master) const;
 
+        // 追加
+        void Draw(const TutorialMaster& master) const;
         // ログの管理もUIの仕事
         void AddLog(const std::string& message);
         void ScrollLog(int wheelDelta, float mouseX, float mouseY);

@@ -1,6 +1,8 @@
-#define NOMINMAX
+ï»¿#define NOMINMAX
+#include <DxLib.h>
 #include "BattleUI.h"
 #include "../Manager/BattleMaster.h"
+#include"../Manager/TutorialMaster.h"
 #include "../Input/InputManager.h"
 #include "../../CyberGrid.h"
 #include "../Utility/AppConfig.h" 
@@ -44,13 +46,13 @@ namespace App {
 
 
     void BattleUI::ScrollLog(int wheelDelta, float mouseX, float mouseY) {
-        // ƒƒOƒpƒlƒ‹‚Ì”ÍˆÍ“à‚Éƒ}ƒEƒX‚ª‚ ‚é‚©
+        // ãƒ­ã‚°ãƒ‘ãƒãƒ«ã®ç¯„å›²å†…ã«ãƒã‚¦ã‚¹ãŒã‚ã‚‹ã‹
         if (mouseX >= 40 && mouseX <= 540 && mouseY >= LOG_PANEL_Y && mouseY <= LOG_PANEL_Y + 200) {
 
-            // UI‘¤‚ÅŠÇ—‚µ‚Ä‚¢‚éƒƒOŒ”‚ÉŠî‚Ã‚¢‚ÄŒvZ
+            // UIå´ã§ç®¡ç†ã—ã¦ã„ã‚‹ãƒ­ã‚°ä»¶æ•°ã«åŸºã¥ã„ã¦è¨ˆç®—
             m_logScrollOffset -= wheelDelta;
 
-            // Å‘åƒXƒNƒ[ƒ‹‰Â”\ˆÊ’u
+            // æœ€å¤§ã‚¹ã‚¯ãƒ­ãƒ¼ãƒ«å¯èƒ½ä½ç½®
             int maxOffset = std::max(0, (int)m_actionLog.size() - 6);
 
             if (m_logScrollOffset < 0) m_logScrollOffset = 0;
@@ -163,20 +165,20 @@ namespace App {
 
         unsigned int phaseCol;
         const char* phaseName;
-        if (master.m_currentPhase == BattleMaster::Phase::P1_Move) { phaseCol = GetColor(180, 110, 0); phaseName = master.m_is1P_NPC ? "1P‚Ìƒ^[ƒ“ (vl’†)" : "1P‚Ìƒ^[ƒ“ (ˆÚ“®‘I‘ğ)"; }
-        else if (master.m_currentPhase == BattleMaster::Phase::P1_Action) { phaseCol = GetColor(180, 110, 0); phaseName = master.m_is1P_NPC ? "1P‚Ìƒ^[ƒ“ (vl’†)" : "1P‚Ìƒ^[ƒ“ (s“®‘I‘ğ)"; }
-        else if (master.m_currentPhase == BattleMaster::Phase::P2_Move) { phaseCol = GetColor(30, 50, 120); phaseName = master.m_is2P_NPC ? "2P‚Ìƒ^[ƒ“ (vl’†)" : "2P‚Ìƒ^[ƒ“ (ˆÚ“®‘I‘ğ)"; }
-        else if (master.m_currentPhase == BattleMaster::Phase::P2_Action) { phaseCol = GetColor(30, 50, 120); phaseName = master.m_is2P_NPC ? "2P‚Ìƒ^[ƒ“ (vl’†)" : "2P‚Ìƒ^[ƒ“ (s“®‘I‘ğ)"; }
-        else { phaseCol = COL_INFO(); phaseName = "I—¹II"; }
+        if (master.m_currentPhase == BattleMaster::Phase::P1_Move) { phaseCol = GetColor(180, 110, 0); phaseName = master.m_is1P_NPC ? "1Pã®ã‚¿ãƒ¼ãƒ³ (æ€è€ƒä¸­)" : "1Pã®ã‚¿ãƒ¼ãƒ³ (ç§»å‹•é¸æŠ)"; }
+        else if (master.m_currentPhase == BattleMaster::Phase::P1_Action) { phaseCol = GetColor(180, 110, 0); phaseName = master.m_is1P_NPC ? "1Pã®ã‚¿ãƒ¼ãƒ³ (æ€è€ƒä¸­)" : "1Pã®ã‚¿ãƒ¼ãƒ³ (è¡Œå‹•é¸æŠ)"; }
+        else if (master.m_currentPhase == BattleMaster::Phase::P2_Move) { phaseCol = GetColor(30, 50, 120); phaseName = master.m_is2P_NPC ? "2Pã®ã‚¿ãƒ¼ãƒ³ (æ€è€ƒä¸­)" : "2Pã®ã‚¿ãƒ¼ãƒ³ (ç§»å‹•é¸æŠ)"; }
+        else if (master.m_currentPhase == BattleMaster::Phase::P2_Action) { phaseCol = GetColor(30, 50, 120); phaseName = master.m_is2P_NPC ? "2Pã®ã‚¿ãƒ¼ãƒ³ (æ€è€ƒä¸­)" : "2Pã®ã‚¿ãƒ¼ãƒ³ (è¡Œå‹•é¸æŠ)"; }
+        else { phaseCol = COL_INFO(); phaseName = "çµ‚äº†ï¼ï¼"; }
 
         DrawBox(0, 0, SCREEN_W, HEADER_H, phaseCol, TRUE);
         DrawLine(0, HEADER_H, SCREEN_W, HEADER_H, COL_TEXT_MAIN(), 2);
 
         DrawFormatStringToHandle(40, 16, COL_TEXT_MAIN(), GetCachedFont(38), ">>> %s", phaseName);
-        DrawFormatStringToHandle(800, 24, COL_TEXT_SUB(), GetCachedFont(24), "Œo‰ßƒ^[ƒ“: %d", master.m_mapGrid.GetTotalTurns());
+        DrawFormatStringToHandle(800, 24, COL_TEXT_SUB(), GetCachedFont(24), "çµŒéã‚¿ãƒ¼ãƒ³: %d", master.m_mapGrid.GetTotalTurns());
 
         // ==========================================
-        // –‘OŒvZƒGƒŠƒA (UI•`‰æ‘O‚É‚·‚×‚Ä‚ÌƒvƒŒƒrƒ…[’l‚ğŒvZ)
+        // äº‹å‰è¨ˆç®—ã‚¨ãƒªã‚¢ (UIæç”»å‰ã«ã™ã¹ã¦ã®ãƒ—ãƒ¬ãƒ“ãƒ¥ãƒ¼å€¤ã‚’è¨ˆç®—)
         // ==========================================
         Vector2 mousePos = InputManager::GetInstance().GetMousePos();
         UnitBase* activeActor = master.GetActiveUnit();
@@ -282,14 +284,14 @@ namespace App {
         }
 
         // ==========================================
-        // ƒ†ƒjƒbƒgƒJ[ƒh‚Ö‚ÌƒvƒŒƒrƒ…[’l“`’B
+        // ãƒ¦ãƒ‹ãƒƒãƒˆã‚«ãƒ¼ãƒ‰ã¸ã®ãƒ—ãƒ¬ãƒ“ãƒ¥ãƒ¼å€¤ä¼é”
         // ==========================================
         int p1PreviewNum = -1; int p1PreviewStocks = master.m_player ? master.m_player->GetStocks() : 0;
         int p2PreviewNum = -1; int p2PreviewStocks = master.m_enemy ? master.m_enemy->GetStocks() : 0;
 
         Fraction p1PreviewScore = master.m_p1ZeroOneScore; bool p1HasScorePreview = false;
         Fraction p2PreviewScore = master.m_p2ZeroOneScore; bool p2HasScorePreview = false;
-        // ‡@ ˆÚ“®‚É‚æ‚éƒvƒŒƒrƒ…[
+        // â‘  ç§»å‹•ã«ã‚ˆã‚‹ãƒ—ãƒ¬ãƒ“ãƒ¥ãƒ¼
         if (isMovePreview) {
             if (activeActor == master.m_player.get()) {
                 int temp = master.m_player->GetNumber() - previewCost;
@@ -305,11 +307,11 @@ namespace App {
             }
         }
 
-        // ‡A ŒvZÀs(ƒzƒo[)‚É‚æ‚éƒvƒŒƒrƒ…[
+        // â‘¡ è¨ˆç®—å®Ÿè¡Œ(ãƒ›ãƒãƒ¼æ™‚)ã«ã‚ˆã‚‹ãƒ—ãƒ¬ãƒ“ãƒ¥ãƒ¼
         if (showCalcPanel && (isHoverSelf || isHoverEnemy)) {
             bool applyTo1P = (isHoverSelf && activeActor == master.m_player.get()) || (!isHoverSelf && activeTarget == master.m_player.get());
 
-            if (master.m_ruleMode == BattleMaster::RuleMode::CLASSIC) {// ƒm[ƒ}ƒ‹ƒoƒgƒ‹‚ÌƒvƒŒƒrƒ…[
+            if (master.m_ruleMode == BattleMaster::RuleMode::CLASSIC) {// ãƒãƒ¼ãƒãƒ«ãƒãƒˆãƒ«ã®ãƒ—ãƒ¬ãƒ“ãƒ¥ãƒ¼
                 if (disp_aOp != '/') {
                     int targetCurrentHp = isHoverSelf ? disp_aNum : disp_tNum;
                     int currentStocks = applyTo1P ? master.m_player->GetStocks() : master.m_enemy->GetStocks();
@@ -327,18 +329,18 @@ namespace App {
                     else { p2PreviewNum = finalNum; p2PreviewStocks = finalStocks; }
                 }
             }
-            else { // ƒJƒEƒ“ƒgƒoƒgƒ‹‚ÌƒvƒŒƒrƒ…[
+            else { // ã‚«ã‚¦ãƒ³ãƒˆãƒãƒˆãƒ«ã®ãƒ—ãƒ¬ãƒ“ãƒ¥ãƒ¼
                 if (disp_aOp != '/') {
                     Fraction goal(master.m_targetScore);
                     Fraction currentScore = applyTo1P ? master.m_p1ZeroOneScore : master.m_p2ZeroOneScore;
                     Fraction nextScore = currentScore + resFrac;
 
-                    if (nextScore > goal) nextScore = goal - (nextScore - goal); // ƒI[ƒo[ƒoƒEƒ“ƒXˆ—
+                    if (nextScore > goal) nextScore = goal - (nextScore - goal); // ã‚ªãƒ¼ãƒãƒ¼ãƒã‚¦ãƒ³ã‚¹å‡¦ç†
 
                     if (applyTo1P) { p1PreviewScore = nextScore; p1HasScorePreview = true; }
                     else { p2PreviewScore = nextScore; p2HasScorePreview = true; }
 
-                    // POWER (”š) ‚Ì’…’n‚àŒvZ
+                    // POWER (æ•°å­—) ã®ç€åœ°ã‚‚è¨ˆç®—
                     int cycleValue = (intRes - 1) % 9;
                     if (cycleValue < 0) cycleValue += 9;
                     int finalNum = cycleValue + 1;
@@ -349,7 +351,7 @@ namespace App {
             }
         }
 
-        // ƒ[ƒvİ’u‚Ì•`‰æ(”wŒiƒT[ƒNƒ‹)
+        // ãƒ¯ãƒ¼ãƒ—è¨­ç½®ã®æç”»(èƒŒæ™¯ã‚µãƒ¼ã‚¯ãƒ«)
         char currentPreviewOp = (showCalcPanel && disp_aOp == '/') ? '/' : '\0';
         if (currentPreviewOp == '/') {
             int wx = disp_aNum - 1;
@@ -370,13 +372,13 @@ namespace App {
             SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
 
             int f18 = GetCachedFont(18);
-            const char* lbl = "Œ‹‰Ê";
+            const char* lbl = "çµæœ";
             int tw = GetDrawStringWidthToHandle(lbl, (int)strlen(lbl), f18);
             DrawStringToHandle((int)center.x - tw / 2, (int)center.y + 15, lbl, COL_TEXT_MAIN(), f18);
         }
 
         // ==========================================
-        // ƒ†ƒjƒbƒgƒJ[ƒh•`‰æ
+        // ãƒ¦ãƒ‹ãƒƒãƒˆã‚«ãƒ¼ãƒ‰æç”»
         // ==========================================
         auto drawUnitCard = [&](int x, int y, UnitBase* unit, bool is1P, int p_previewNum, int p_previewStocks, Fraction p_previewScore, bool p_hasScorePreview) {
             if (!unit) return;
@@ -398,7 +400,7 @@ namespace App {
                 DrawBox(x, scoreY, x + 500, scoreY + 140, COL_DARK_BG(), TRUE);
                 Fraction f = is1P ? master.m_p1ZeroOneScore : master.m_p2ZeroOneScore;
 
-                DrawStringToHandle(x + 10, scoreY + 5, "Œ»İ‚ÌƒXƒRƒA", COL_TEXT_SUB(), GetCachedFont(18));
+                DrawStringToHandle(x + 10, scoreY + 5, "ç¾åœ¨ã®ã‚¹ã‚³ã‚¢", COL_TEXT_SUB(), GetCachedFont(18));
 
                 if (f.d == 1) {
                     int f100 = GetCachedFont(100);
@@ -423,7 +425,7 @@ namespace App {
                     DrawFormatStringToHandle(cx - dw / 2, scoreY + 80, fracCol, f60, "%s", dStr.c_str());
                 }
 
-                // ƒXƒRƒAƒvƒŒƒrƒ…[‚ÌUI•\¦I
+                // ã‚¹ã‚³ã‚¢ãƒ—ãƒ¬ãƒ“ãƒ¥ãƒ¼ã®UIè¡¨ç¤ºï¼
                 if (p_hasScorePreview && !(p_previewScore.n == f.n && p_previewScore.d == f.d)) {
                     int f60 = GetCachedFont(60);
                     int f40 = GetCachedFont(40);
@@ -431,11 +433,11 @@ namespace App {
                     unsigned int previewCol = (p_previewScore.n == master.m_targetScore) ? COL_WARN() :
                         (p_previewScore.n < f.n ? COL_DANGER() : COL_SAFE());
 
-                    int arrowX = x + 230; // –îˆó‚ÌXÀ•W
+                    int arrowX = x + 230; // çŸ¢å°ã®Xåº§æ¨™
 
                     int blinkAlpha = (int)(150 + 100 * std::sin(GetNowCount() / 100.0));
                     SetDrawBlendMode(DX_BLENDMODE_ALPHA, blinkAlpha);
-                    DrawStringToHandle(arrowX, scoreY + 45, "¨", COL_TEXT_SUB(), f40);
+                    DrawStringToHandle(arrowX, scoreY + 45, "â†’", COL_TEXT_SUB(), f40);
 
                     if (p_previewScore.d == 1) {
                         std::string pStr = std::to_string(p_previewScore.n);
@@ -452,15 +454,15 @@ namespace App {
                     }
                     SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
 
-                    // Œ‹‰Ê‚ÌƒeƒLƒXƒg•\¦
+                    // çµæœã®ãƒ†ã‚­ã‚¹ãƒˆè¡¨ç¤º
                     if (p_previewScore.n == master.m_targetScore) {
                         //DrawStringToHandle(arrowX + 50, scoreY + 100, "+", COL_WARN(), f20);
                     }
                     else if (p_previewScore.n < f.n) {
-                        //DrawStringToHandle(arrowX + 50, scoreY + 100, "|", COL_DANGER(), f20);
+                        //DrawStringToHandle(arrowX + 50, scoreY + 100, "ï¼", COL_DANGER(), f20);
                     }
                     else {
-                        DrawFormatStringToHandle(arrowX + 50, scoreY + 100, COL_SAFE(), f20, "%+d “_", p_previewScore.n - f.n);
+                        DrawFormatStringToHandle(arrowX + 50, scoreY + 100, COL_SAFE(), f20, "%+d ç‚¹", p_previewScore.n - f.n);
                     }
                 }
 
@@ -468,7 +470,7 @@ namespace App {
                 DrawBox(x, targetBoxY, x + 500, targetBoxY + 35, GetColor(20, 30, 40), TRUE);
                 DrawBox(x, targetBoxY, x + 500, targetBoxY + 35, COL_INFO(), FALSE);
 
-                DrawStringToHandle(x + 15, targetBoxY + 8, "–Ú•WƒXƒRƒA", COL_INFO(), GetCachedFont(20));
+                DrawStringToHandle(x + 15, targetBoxY + 8, "ç›®æ¨™ã‚¹ã‚³ã‚¢", COL_INFO(), GetCachedFont(20));
 
                 int f32 = GetCachedFont(32);
                 DrawFormatStringToHandle(x + 390, targetBoxY + 2, COL_TEXT_DARK(), f32, "000");
@@ -476,13 +478,13 @@ namespace App {
             }
             else {
                 DrawBox(x, scoreY, x + 500, scoreY + 35, COL_DARK_BG(), TRUE);
-                DrawStringToHandle(x + 15, scoreY + 8, "ƒm[ƒ}ƒ‹ƒoƒgƒ‹", COL_TEXT_SUB(), GetCachedFont(20));
+                DrawStringToHandle(x + 15, scoreY + 8, "ãƒãƒ¼ãƒãƒ«ãƒãƒˆãƒ«", COL_TEXT_SUB(), GetCachedFont(20));
             }
 
             int powerY = scoreY + (master.m_ruleMode == BattleMaster::RuleMode::ZERO_ONE ? 190 : 50);
             DrawBox(x, powerY, x + 500, powerY + 120, COL_DARK_BG(), TRUE);
 
-            DrawStringToHandle(x + 15, powerY + 10, "ƒpƒ[", COL_WARN(), GetCachedFont(24));
+            DrawStringToHandle(x + 15, powerY + 10, "ãƒ‘ãƒ¯ãƒ¼", COL_WARN(), GetCachedFont(24));
             DrawLine(x + 100, powerY + 24, x + 490, powerY + 24, GetColor(60, 60, 70), 1);
 
             int currentNum = unit->GetNumber();
@@ -540,8 +542,8 @@ namespace App {
                 if (i == preview && preview != currentNum && !isDeadPreview) {
                     currentYOff = -14.0f;
                     numCol = COL_SAFE();
-                    int twTriangle = GetDrawStringWidthToHandle("£", 2, f16Tri);
-                    DrawStringToHandle(px - twTriangle / 2, py + 26, "£", COL_SAFE(), f16Tri);
+                    int twTriangle = GetDrawStringWidthToHandle("â–²", 2, f16Tri);
+                    DrawStringToHandle(px - twTriangle / 2, py + 26, "â–²", COL_SAFE(), f16Tri);
                 }
 
                 int tw = GetDrawStringWidthToHandle(numStr.c_str(), 1, f32Num);
@@ -553,20 +555,20 @@ namespace App {
                 int textY = powerY + 130;
                 if (master.m_ruleMode == BattleMaster::RuleMode::CLASSIC) {
                     if (isDeadPreview) {
-                        DrawFormatStringToHandle(x + 15, textY, COL_DANGER(), f20, "¥ Œx : ƒoƒbƒeƒŠ[ŒÍŠ‰y ”j‰ó zI");
+                        DrawFormatStringToHandle(x + 15, textY, COL_DANGER(), f20, "â–¼ è­¦å‘Š : ãƒãƒƒãƒ†ãƒªãƒ¼æ¯æ¸‡ã€ ç ´å£Š ã€‘ï¼");
                     }
                     else if (p_previewStocks != -1 && p_previewStocks < unit->GetStocks()) {
-                        DrawFormatStringToHandle(x + 15, textY, COL_WARN(), f20, "¥ ƒoƒbƒeƒŠ[Á”ï : %d ¨ %d", currentNum, preview);
+                        DrawFormatStringToHandle(x + 15, textY, COL_WARN(), f20, "â–¼ ãƒãƒƒãƒ†ãƒªãƒ¼æ¶ˆè²» : %d â†’ %d", currentNum, preview);
                     }
                     else if (p_previewStocks != -1 && p_previewStocks > unit->GetStocks()) {
-                        DrawFormatStringToHandle(x + 15, textY, COL_SAFE(), f20, "£ ’´‰ß‚ÅƒoƒbƒeƒŠ[‰ñ•œI : %d ¨ %d", currentNum, preview);
+                        DrawFormatStringToHandle(x + 15, textY, COL_SAFE(), f20, "â–² è¶…éã§ãƒãƒƒãƒ†ãƒªãƒ¼å›å¾©ï¼ : %d â†’ %d", currentNum, preview);
                     }
                     else {
-                        DrawFormatStringToHandle(x + 15, textY, COL_SAFE(), f20, "”½‰fŒãƒvƒŒƒrƒ…[ : %d ¨ %d", currentNum, preview);
+                        DrawFormatStringToHandle(x + 15, textY, COL_SAFE(), f20, "åæ˜ å¾Œãƒ—ãƒ¬ãƒ“ãƒ¥ãƒ¼ : %d â†’ %d", currentNum, preview);
                     }
                 }
                 else {
-                    DrawFormatStringToHandle(x + 15, textY, COL_SAFE(), f20, "”½‰fŒãƒpƒ[ : %d ¨ %d", currentNum, preview);
+                    DrawFormatStringToHandle(x + 15, textY, COL_SAFE(), f20, "åæ˜ å¾Œãƒ‘ãƒ¯ãƒ¼ : %d â†’ %d", currentNum, preview);
                 }
             }
 
@@ -575,7 +577,7 @@ namespace App {
             int f22 = GetCachedFont(22);
 
             if (master.m_ruleMode == BattleMaster::RuleMode::CLASSIC) {
-                DrawStringToHandle(x + 20, infoY + 18, "ƒoƒbƒeƒŠ[", GetColor(180, 180, 180), f22);
+                DrawStringToHandle(x + 20, infoY + 18, "ãƒãƒƒãƒ†ãƒªãƒ¼", GetColor(180, 180, 180), f22);
 
                 int currentStocks = unit->GetStocks();
                 int previewStocks = (p_previewStocks != -1) ? p_previewStocks : currentStocks;
@@ -594,7 +596,7 @@ namespace App {
 
                         DrawBox(sx, sy, sx + sw, sy + sh, GetColor(200, 50, 50), TRUE);
                         DrawBox(sx + sw, sy + 8, sx + sw + 5, sy + sh - 8, GetColor(200, 50, 50), TRUE);
-                        DrawStringToHandle(sx + 4, sy - 20, "Á”ï!", COL_DANGER(), f16Tri);
+                        DrawStringToHandle(sx + 4, sy - 20, "æ¶ˆè²»!", COL_DANGER(), f16Tri);
                     }
                     else if (i >= currentStocks && i < previewStocks) {
                         int blinkAlpha = (int)(120 + 120 * std::sin(GetNowCount() / 50.0));
@@ -604,7 +606,7 @@ namespace App {
 
                         DrawBox(sx, sy, sx + sw, sy + sh, GetColor(50, 200, 100), TRUE);
                         DrawBox(sx + sw, sy + 8, sx + sw + 5, sy + sh - 8, GetColor(50, 200, 100), TRUE);
-                        DrawStringToHandle(sx + 4, sy - 20, "‰ñ•œ!", COL_SAFE(), f16Tri);
+                        DrawStringToHandle(sx + 4, sy - 20, "å›å¾©!", COL_SAFE(), f16Tri);
                     }
                     else if (i < currentStocks) {
                         DrawBox(sx, sy, sx + sw, sy + sh, baseCol, TRUE);
@@ -627,14 +629,14 @@ namespace App {
             int moveDist = 3 - ((unit->GetNumber() - 1) % 3);
             if (p_previewNum != -1 && p_previewNum != unit->GetNumber()) {
                 int nextMoveDist = 3 - ((p_previewNum - 1) % 3);
-                DrawFormatStringToHandle(x + 20, infoY + 65, COL_TEXT_SUB(), f22, "ˆÚ“®‰Â”\ƒ}ƒX: %d ¨ %d ƒ}ƒX", moveDist, nextMoveDist);
+                DrawFormatStringToHandle(x + 20, infoY + 65, COL_TEXT_SUB(), f22, "ç§»å‹•å¯èƒ½ãƒã‚¹: %d â†’ %d ãƒã‚¹", moveDist, nextMoveDist);
             }
             else {
-                DrawFormatStringToHandle(x + 20, infoY + 65, COL_TEXT_SUB(), f22, "ˆÚ“®‰Â”\ƒ}ƒX: %d ƒ}ƒX", moveDist);
+                DrawFormatStringToHandle(x + 20, infoY + 65, COL_TEXT_SUB(), f22, "ç§»å‹•å¯èƒ½ãƒã‚¹: %d ãƒã‚¹", moveDist);
             }
 
             int ix = x + 350, iy = infoY + 15;
-            DrawStringToHandle(ix - 5, iy, "yˆÚ“®”ÍˆÍz", COL_DISABLE(), GetCachedFont(18));
+            DrawStringToHandle(ix - 5, iy, "ã€ç§»å‹•ç¯„å›²ã€‘", COL_DISABLE(), GetCachedFont(18));
             int targetNumForGrid = (p_previewNum != -1) ? p_previewNum : unit->GetNumber();
             unsigned int gridBaseCol = (p_previewNum != -1) ? COL_SAFE() : baseCol;
 
@@ -646,34 +648,34 @@ namespace App {
             }
             };
 
-        // ÀsF¶‚Ì1P‚Æ‰E‚Ì2P‚ğ•`‰æI
+        // å®Ÿè¡Œï¼šå·¦ã®1Pã¨å³ã®2Pã‚’æç”»ï¼
         drawUnitCard(40, 100, master.m_player.get(), true, p1PreviewNum, p1PreviewStocks, p1PreviewScore, p1HasScorePreview);
         drawUnitCard(1380, 100, master.m_enemy.get(), false, p2PreviewNum, p2PreviewStocks, p2PreviewScore, p2HasScorePreview);
 
         // ==========================================
-         // ƒƒOƒpƒlƒ‹•`‰æ(ƒXƒNƒ[ƒ‹•ƒXƒNƒ[ƒ‹ƒo[‘Î‰)
+         // ãƒ­ã‚°ãƒ‘ãƒãƒ«æç”»(ã‚¹ã‚¯ãƒ­ãƒ¼ãƒ«ï¼†ã‚¹ã‚¯ãƒ­ãƒ¼ãƒ«ãƒãƒ¼å¯¾å¿œ)
          // ==========================================
 
         int f22 = GetCachedFont(22);
         int f20 = GetCachedFont(20);
 
         DrawLine(40, LOG_PANEL_Y, 540, LOG_PANEL_Y, GetColor(60, 60, 70), 1);
-        DrawStringToHandle(40, LOG_PANEL_Y + 10, "ƒƒO", COL_DISABLE(), f22);
+        DrawStringToHandle(40, LOG_PANEL_Y + 10, "ãƒ­ã‚°", COL_DISABLE(), f22);
 
         int maxLogOffset = std::max(0, (int)m_actionLog.size() - 6);
 
-        // ƒƒO‚ª6ŒˆÈã‚ ‚éê‡‚ÍƒXƒNƒ[ƒ‹ƒo[‚ğ•`‰æ
+        // ãƒ­ã‚°ãŒ6ä»¶ä»¥ä¸Šã‚ã‚‹å ´åˆã¯ã‚¹ã‚¯ãƒ­ãƒ¼ãƒ«ãƒãƒ¼ã‚’æç”»
         if (maxLogOffset > 0) {
-            // ƒXƒNƒ[ƒ‹ƒo[‚Ì”wŒia
+            // ã‚¹ã‚¯ãƒ­ãƒ¼ãƒ«ãƒãƒ¼ã®èƒŒæ™¯æº
             DrawBox(530, LOG_PANEL_Y + 45, 535, LOG_PANEL_Y + 195, GetColor(30, 30, 40), TRUE);
 
-            // ‚Â‚Ü‚İ‚ÌˆÊ’u
+            // ã¤ã¾ã¿ã®ä½ç½®
             float scrollRatio = (float)m_logScrollOffset / maxLogOffset;
             int thumbY = LOG_PANEL_Y + 45 + (int)(scrollRatio * (150 - 30));
             DrawBox(530, thumbY, 535, thumbY + 30, GetColor(100, 150, 200), TRUE);
         }
 
-        // ÀÛ‚ÉƒƒO‚Ì•¶š—ñ‚ğ•`‰æ‚·‚éƒ‹[ƒv
+        // å®Ÿéš›ã«ãƒ­ã‚°ã®æ–‡å­—åˆ—ã‚’æç”»ã™ã‚‹ãƒ«ãƒ¼ãƒ—
         int startIdx = m_logScrollOffset;
         int endIdx = std::min((int)m_actionLog.size(), startIdx + 6);
 
@@ -683,12 +685,12 @@ namespace App {
         }
 
         DrawLine(1380, LOG_PANEL_Y, 1880, LOG_PANEL_Y, GetColor(60, 60, 70), 1);
-        DrawStringToHandle(1380, LOG_PANEL_Y + 10, "Šî–{ƒ‹[ƒ‹", COL_DISABLE(), f22);
-        DrawStringToHandle(1380, LOG_PANEL_Y + 50, " ƒpƒ[‚ª1, 4, 7 ‚Ì 3ƒ}ƒXˆÚ“®", GetColor(255, 200, 100), f22);
-        DrawStringToHandle(1380, LOG_PANEL_Y + 90, " ƒpƒ[‚ª2, 5, 8 ‚Ì 2ƒ}ƒXˆÚ“®", GetColor(180, 180, 180), f22);
-        DrawStringToHandle(1380, LOG_PANEL_Y + 130, " ƒpƒ[‚ª3, 6, 9 ‚Ì 1ƒ}ƒXˆÚ“®", GetColor(100, 150, 255), f22);
-        DrawStringToHandle(1380, LOG_PANEL_Y + 180, "Še‰‰Zqæ“¾‚ÅˆÚ“®•ûŒü’Ç‰Á", GetColor(255, 255, 180), f22);
-        DrawStringToHandle(1380, LOG_PANEL_Y + 215, " € ‚Í (•ªq,•ª•ê)‚Ìƒ}ƒX‚Éƒ[ƒvİ’u", COL_INFO(), f22);
+        DrawStringToHandle(1380, LOG_PANEL_Y + 10, "åŸºæœ¬ãƒ«ãƒ¼ãƒ«", COL_DISABLE(), f22);
+        DrawStringToHandle(1380, LOG_PANEL_Y + 50, " ãƒ‘ãƒ¯ãƒ¼ãŒ1, 4, 7 ã®æ™‚ 3ãƒã‚¹ç§»å‹•", GetColor(255, 200, 100), f22);
+        DrawStringToHandle(1380, LOG_PANEL_Y + 90, " ãƒ‘ãƒ¯ãƒ¼ãŒ2, 5, 8 ã®æ™‚ 2ãƒã‚¹ç§»å‹•", GetColor(180, 180, 180), f22);
+        DrawStringToHandle(1380, LOG_PANEL_Y + 130, " ãƒ‘ãƒ¯ãƒ¼ãŒ3, 6, 9 ã®æ™‚ 1ãƒã‚¹ç§»å‹•", GetColor(100, 150, 255), f22);
+        DrawStringToHandle(1380, LOG_PANEL_Y + 180, "å„æ¼”ç®—å­å–å¾—ã§ç§»å‹•æ–¹å‘è¿½åŠ ", GetColor(255, 255, 180), f22);
+        DrawStringToHandle(1380, LOG_PANEL_Y + 215, " Ã· ã¯ (åˆ†å­,åˆ†æ¯)ã®ãƒã‚¹ã«ãƒ¯ãƒ¼ãƒ—è¨­ç½®", COL_INFO(), f22);
 
         SetDrawBlendMode(DX_BLENDMODE_ALPHA, 200);
         DrawBox(600, BOTTOM_PANEL_Y, 1320, 940, COL_BOTTOM_BG(), TRUE);
@@ -698,7 +700,7 @@ namespace App {
         DrawLine(600, BOTTOM_PANEL_Y, 1320, BOTTOM_PANEL_Y, calcBorderCol, 2);
 
         // ==========================================
-        // ‰º•”ƒpƒlƒ‹‚ÌŒvZ®EƒvƒŒƒrƒ…[•`‰æ
+        // ä¸‹éƒ¨ãƒ‘ãƒãƒ«ã®è¨ˆç®—å¼ãƒ»ãƒ—ãƒ¬ãƒ“ãƒ¥ãƒ¼æç”»
         // ==========================================
         if (showCalcPanel) {
             int f64 = GetCachedFont(64);
@@ -706,25 +708,25 @@ namespace App {
             int f20 = GetCachedFont(20);
 
             if (isPreviewMode) {
-                int preY = BOTTOM_PANEL_Y - 26; // ƒpƒlƒ‹˜gü‚Ì­‚µã‚É•`‰æ
-                if (willGetNewOp) DrawFormatStringToHandle(600, preY, GetColor(255, 200, 100), f20, "¥ ˆÚ“®ƒvƒŒƒrƒ…[(‰‰Zq [%c] ‚ğæ“¾‚µ‚Äƒoƒgƒ‹)", disp_aOp);
-                else DrawStringToHandle(600, preY, "¥ ˆÚ“®ƒvƒŒƒrƒ…[(ƒoƒgƒ‹”­¶)", GetColor(255, 200, 100), f20);
+                int preY = BOTTOM_PANEL_Y - 26; // ãƒ‘ãƒãƒ«æ ç·šã®å°‘ã—ä¸Šã«æç”»
+                if (willGetNewOp) DrawFormatStringToHandle(600, preY, GetColor(255, 200, 100), f20, "â–¼ ç§»å‹•ãƒ—ãƒ¬ãƒ“ãƒ¥ãƒ¼(æ¼”ç®—å­ [%c] ã‚’å–å¾—ã—ã¦ãƒãƒˆãƒ«)", disp_aOp);
+                else DrawStringToHandle(600, preY, "â–¼ ç§»å‹•ãƒ—ãƒ¬ãƒ“ãƒ¥ãƒ¼(ãƒãƒˆãƒ«ç™ºç”Ÿ)", GetColor(255, 200, 100), f20);
             }
 
-            // ¶•Ó‚Æ‰E•Ó‚Ìu’N‚Ì”š‚©vƒ‰ƒxƒ‹‚ğŒˆ’è
+            // å·¦è¾ºã¨å³è¾ºã®ã€Œèª°ã®æ•°å­—ã‹ã€ãƒ©ãƒ™ãƒ«ã‚’æ±ºå®š
             std::string leftLabel, rightLabel;
             unsigned int leftCol = COL_TEXT_SUB(), rightCol = COL_TEXT_SUB();
 
             if (disp_aOp == '/') {
-                leftLabel = "XÀ•W";  leftCol = COL_INFO();
-                rightLabel = "YÀ•W"; rightCol = COL_INFO();
+                leftLabel = "Xåº§æ¨™";  leftCol = COL_INFO();
+                rightLabel = "Yåº§æ¨™"; rightCol = COL_INFO();
             }
             else {
-                // í‚É¶‚ªu©•ª(s“®Ò)vA‰E‚ªu‘Šè(ƒ^[ƒQƒbƒg)v
-                leftLabel = "©•ª";
+                // å¸¸ã«å·¦ãŒã€Œè‡ªåˆ†(è¡Œå‹•è€…)ã€ã€å³ãŒã€Œç›¸æ‰‹(ã‚¿ãƒ¼ã‚²ãƒƒãƒˆ)ã€
+                leftLabel = "è‡ªåˆ†";
                 leftCol = master.Is1PTurn() ? COL_P1() : COL_P2();
 
-                rightLabel = "‘Šè";
+                rightLabel = "ç›¸æ‰‹";
                 rightCol = master.Is1PTurn() ? COL_P2() : COL_P1();
             }
 
@@ -756,40 +758,40 @@ namespace App {
                     std::string strMy = (nextMy.d == 1) ? std::to_string(nextMy.n) : (std::to_string(nextMy.n) + "/" + std::to_string(nextMy.d));
                     std::string strEn = (nextEn.d == 1) ? std::to_string(nextEn.n) : (std::to_string(nextEn.n) + "/" + std::to_string(nextEn.d));
 
-                    DrawStringToHandle(650, BOTTOM_PANEL_Y + 85, "y©•ª‚É”½‰fz", COL_SAFE(), f22);
-                    DrawFormatStringToHandle(790, BOTTOM_PANEL_Y + 85, COL_TEXT_SUB(), f22, "ƒXƒRƒA: %s", strMy.c_str());
+                    DrawStringToHandle(650, BOTTOM_PANEL_Y + 85, "ã€è‡ªåˆ†ã«åæ˜ ã€‘", COL_SAFE(), f22);
+                    DrawFormatStringToHandle(790, BOTTOM_PANEL_Y + 85, COL_TEXT_SUB(), f22, "ã‚¹ã‚³ã‚¢: %s", strMy.c_str());
 
-                    DrawStringToHandle(950, BOTTOM_PANEL_Y + 85, "y‘Šè‚É”½‰fz", COL_DANGER(), f22);
-                    DrawFormatStringToHandle(1090, BOTTOM_PANEL_Y + 85, COL_TEXT_SUB(), f22, "ƒXƒRƒA: %s", strEn.c_str());
+                    DrawStringToHandle(950, BOTTOM_PANEL_Y + 85, "ã€ç›¸æ‰‹ã«åæ˜ ã€‘", COL_DANGER(), f22);
+                    DrawFormatStringToHandle(1090, BOTTOM_PANEL_Y + 85, COL_TEXT_SUB(), f22, "ã‚¹ã‚³ã‚¢: %s", strEn.c_str());
 
                     if (disp_aOp == '/') {
                         int wx = disp_aNum - 1; int wy = 9 - disp_tNum;
                         if (isCleanDivide) {
-                            DrawFormatStringToHandle(650, BOTTOM_PANEL_Y + 115, COL_SAFE(), f22, "À•W(%d, %d)‚Éy©•ªz‚Ìƒ[ƒvİ’uI", wx, wy);
-                            DrawFormatStringToHandle(950, BOTTOM_PANEL_Y + 115, COL_DANGER(), f22, "À•W(%d, %d)‚Éy‘Šèz‚Ìƒ[ƒvİ’uI", wx, wy);
+                            DrawFormatStringToHandle(650, BOTTOM_PANEL_Y + 115, COL_SAFE(), f22, "åº§æ¨™(%d, %d)ã«ã€è‡ªåˆ†ã€‘ã®ãƒ¯ãƒ¼ãƒ—è¨­ç½®ï¼", wx, wy);
+                            DrawFormatStringToHandle(950, BOTTOM_PANEL_Y + 115, COL_DANGER(), f22, "åº§æ¨™(%d, %d)ã«ã€ç›¸æ‰‹ã€‘ã®ãƒ¯ãƒ¼ãƒ—è¨­ç½®ï¼", wx, wy);
                         }
                         else {
-                            DrawFormatStringToHandle(650, BOTTOM_PANEL_Y + 115, COL_INFO(), f22, "À•W(%d, %d)‚Éƒ[ƒvİ’u (¦Š„‚èØ‚ê‚È‚¢‚½‚ßƒXƒRƒA•Ï“®‚È‚µ)", wx, wy);
+                            DrawFormatStringToHandle(650, BOTTOM_PANEL_Y + 115, COL_INFO(), f22, "åº§æ¨™(%d, %d)ã«ãƒ¯ãƒ¼ãƒ—è¨­ç½® (â€»å‰²ã‚Šåˆ‡ã‚Œãªã„ãŸã‚ã‚¹ã‚³ã‚¢å¤‰å‹•ãªã—)", wx, wy);
                         }
                     }
                 }
                 else {
                     if (isHoverSelf || isHoverEnemy) {
                         std::string targetName = isHoverSelf ? (activeActor == master.m_player.get() ? "1P" : "2P") : (activeTarget == master.m_player.get() ? "1P" : "2P");
-                        DrawFormatStringToHandle(650, BOTTOM_PANEL_Y + 82, COL_TEXT_MAIN(), f22, "¥ %s ‚ÌƒXƒRƒA‚É‚±‚ÌŒ‹‰Ê‚ğ”½‰f", targetName.c_str());
+                        DrawFormatStringToHandle(650, BOTTOM_PANEL_Y + 82, COL_TEXT_MAIN(), f22, "â–¼ %s ã®ã‚¹ã‚³ã‚¢ã«ã“ã®çµæœã‚’åæ˜ ", targetName.c_str());
                         if (disp_aOp == '/') {
                             unsigned int warpCol = isHoverSelf ? COL_SAFE() : COL_DANGER();
-                            if (isCleanDivide) DrawFormatStringToHandle(650, BOTTOM_PANEL_Y + 112, warpCol, f22, "‚³‚ç‚ÉÀ•W(%d, %d)‚Éy%sz‚Ìƒ[ƒvİ’uI", disp_aNum, disp_tNum, targetName.c_str());
-                            else DrawFormatStringToHandle(650, BOTTOM_PANEL_Y + 112, warpCol, f22, "À•W(%d, %d)‚Éy%sz‚Ìƒ[ƒvİ’uI (¦ƒXƒRƒA•Ï“®‚È‚µ)", disp_aNum, disp_tNum, targetName.c_str());
+                            if (isCleanDivide) DrawFormatStringToHandle(650, BOTTOM_PANEL_Y + 112, warpCol, f22, "ã•ã‚‰ã«åº§æ¨™(%d, %d)ã«ã€%sã€‘ã®ãƒ¯ãƒ¼ãƒ—è¨­ç½®ï¼", disp_aNum, disp_tNum, targetName.c_str());
+                            else DrawFormatStringToHandle(650, BOTTOM_PANEL_Y + 112, warpCol, f22, "åº§æ¨™(%d, %d)ã«ã€%sã€‘ã®ãƒ¯ãƒ¼ãƒ—è¨­ç½®ï¼ (â€»ã‚¹ã‚³ã‚¢å¤‰å‹•ãªã—)", disp_aNum, disp_tNum, targetName.c_str());
                         }
                     }
                     else {
-                        DrawStringToHandle(770, BOTTOM_PANEL_Y + 82, "‚Ç‚¿‚ç‚É”½‰f‚µ‚Ü‚·‚©", GetColor(120, 120, 130), f22);
-                        if (disp_aOp == '/') DrawFormatStringToHandle(770, BOTTOM_PANEL_Y + 112, COL_INFO(), f22, "ÀsA‘I‘ğ‚µ‚½‘ÎÛ‚Éƒ[ƒv‚ğİ’uI");
+                        DrawStringToHandle(770, BOTTOM_PANEL_Y + 82, "ã©ã¡ã‚‰ã«åæ˜ ã—ã¾ã™ã‹", GetColor(120, 120, 130), f22);
+                        if (disp_aOp == '/') DrawFormatStringToHandle(770, BOTTOM_PANEL_Y + 112, COL_INFO(), f22, "å®Ÿè¡Œæ™‚ã€é¸æŠã—ãŸå¯¾è±¡ã«ãƒ¯ãƒ¼ãƒ—ã‚’è¨­ç½®ï¼");
                     }
                 }
             }
-            else { // ƒm[ƒ}ƒ‹ƒoƒgƒ‹
+            else { // ãƒãƒ¼ãƒãƒ«ãƒãƒˆãƒ«
                 int calcY = BOTTOM_PANEL_Y + 22;
 
                 DrawStringToHandle(672, calcY - 18, leftLabel.c_str(), leftCol, f16);
@@ -806,10 +808,10 @@ namespace App {
 
                 if (isPreviewMode) {
                     if (disp_aOp == '/' && !isCleanDivide) {
-                        DrawStringToHandle(650, BOTTOM_PANEL_Y + 85, "y©•ª‚É”½‰fz", COL_SAFE(), f22);
-                        DrawFormatStringToHandle(650, BOTTOM_PANEL_Y + 115, COL_INFO(), f22, "À•W(%d, %d)‚Éƒ[ƒvİ’u", disp_aNum, disp_tNum);
-                        DrawStringToHandle(950, BOTTOM_PANEL_Y + 85, "y‘Šè‚É”½‰fz", COL_DANGER(), f22);
-                        DrawFormatStringToHandle(950, BOTTOM_PANEL_Y + 115, COL_INFO(), f22, "À•W(%d, %d)‚Éƒ[ƒvİ’u", disp_aNum, disp_tNum);
+                        DrawStringToHandle(650, BOTTOM_PANEL_Y + 85, "ã€è‡ªåˆ†ã«åæ˜ ã€‘", COL_SAFE(), f22);
+                        DrawFormatStringToHandle(650, BOTTOM_PANEL_Y + 115, COL_INFO(), f22, "åº§æ¨™(%d, %d)ã«ãƒ¯ãƒ¼ãƒ—è¨­ç½®", disp_aNum, disp_tNum);
+                        DrawStringToHandle(950, BOTTOM_PANEL_Y + 85, "ã€ç›¸æ‰‹ã«åæ˜ ã€‘", COL_DANGER(), f22);
+                        DrawFormatStringToHandle(950, BOTTOM_PANEL_Y + 115, COL_INFO(), f22, "åº§æ¨™(%d, %d)ã«ãƒ¯ãƒ¼ãƒ—è¨­ç½®", disp_aNum, disp_tNum);
                     }
                     else {
                         auto calcDmg = [](int currentHp, int currentStocks, int val, int& outHp, int& outStocks) {
@@ -821,17 +823,17 @@ namespace App {
                         calcDmg(disp_aNum, activeActor->GetStocks(), intRes, myHp, mySt);
                         calcDmg(disp_tNum, activeTarget->GetStocks(), intRes, enHp, enSt);
 
-                        DrawStringToHandle(650, BOTTOM_PANEL_Y + 85, "y©•ª‚É”½‰fz", COL_SAFE(), f22);
-                        if (mySt <= 0 && myHp <= 0) DrawStringToHandle(790, BOTTOM_PANEL_Y + 85, "”s–k", COL_DANGER(), f22);
-                        else DrawFormatStringToHandle(790, BOTTOM_PANEL_Y + 85, COL_TEXT_SUB(), f22, "c‹@ %d / ‘Ì—Í %d", mySt, myHp);
+                        DrawStringToHandle(650, BOTTOM_PANEL_Y + 85, "ã€è‡ªåˆ†ã«åæ˜ ã€‘", COL_SAFE(), f22);
+                        if (mySt <= 0 && myHp <= 0) DrawStringToHandle(790, BOTTOM_PANEL_Y + 85, "æ•—åŒ—", COL_DANGER(), f22);
+                        else DrawFormatStringToHandle(790, BOTTOM_PANEL_Y + 85, COL_TEXT_SUB(), f22, "æ®‹æ©Ÿ %d / ä½“åŠ› %d", mySt, myHp);
 
-                        DrawStringToHandle(950, BOTTOM_PANEL_Y + 85, "y‘Šè‚É”½‰fz", COL_DANGER(), f22);
-                        if (enSt <= 0 && enHp <= 0) DrawStringToHandle(1090, BOTTOM_PANEL_Y + 85, "Ÿ—˜", COL_WARN(), f22);
-                        else DrawFormatStringToHandle(1090, BOTTOM_PANEL_Y + 85, COL_TEXT_SUB(), f22, "c‹@ %d | ‘Ì—Í %d", enSt, enHp);
+                        DrawStringToHandle(950, BOTTOM_PANEL_Y + 85, "ã€ç›¸æ‰‹ã«åæ˜ ã€‘", COL_DANGER(), f22);
+                        if (enSt <= 0 && enHp <= 0) DrawStringToHandle(1090, BOTTOM_PANEL_Y + 85, "å‹åˆ©", COL_WARN(), f22);
+                        else DrawFormatStringToHandle(1090, BOTTOM_PANEL_Y + 85, COL_TEXT_SUB(), f22, "æ®‹æ©Ÿ %d | ä½“åŠ› %d", enSt, enHp);
 
                         if (disp_aOp == '/') {
-                            DrawFormatStringToHandle(650, BOTTOM_PANEL_Y + 115, COL_SAFE(), f22, "À•W(%d, %d)‚Éy©•ªz‚Ìƒ[ƒvİ’uI", disp_aNum, disp_tNum);
-                            DrawFormatStringToHandle(950, BOTTOM_PANEL_Y + 115, COL_DANGER(), f22, "À•W(%d, %d)‚Éy‘Šèz‚Ìƒ[ƒvİ’uI", disp_aNum, disp_tNum);
+                            DrawFormatStringToHandle(650, BOTTOM_PANEL_Y + 115, COL_SAFE(), f22, "åº§æ¨™(%d, %d)ã«ã€è‡ªåˆ†ã€‘ã®ãƒ¯ãƒ¼ãƒ—è¨­ç½®ï¼", disp_aNum, disp_tNum);
+                            DrawFormatStringToHandle(950, BOTTOM_PANEL_Y + 115, COL_DANGER(), f22, "åº§æ¨™(%d, %d)ã«ã€ç›¸æ‰‹ã€‘ã®ãƒ¯ãƒ¼ãƒ—è¨­ç½®ï¼", disp_aNum, disp_tNum);
                         }
                     }
                 }
@@ -845,19 +847,19 @@ namespace App {
                         while (simulatedHp <= 0) { stockChange--; simulatedHp += 9; }
                         while (simulatedHp > 9) { stockChange++; simulatedHp -= 9; }
 
-                        if (stockChange < 0) DrawFormatStringToHandle(620, BOTTOM_PANEL_Y + 82, COL_DANGER(), f22, "¥ UŒ‚I %s ‚Ìy ƒoƒbƒeƒŠ[‚ğ%d zAƒpƒ[‚ğ [%d] ‚É‚µ‚Ü‚·", targetName.c_str(), stockChange, simulatedHp);
-                        else if (stockChange > 0) DrawFormatStringToHandle(620, BOTTOM_PANEL_Y + 82, COL_SAFE(), f22, "¥ ‰ñ•œI %s ‚Ìy ƒoƒbƒeƒŠ[‚ğ+%d zAƒpƒ[‚ğ [%d] ‚É‚µ‚Ü‚·", targetName.c_str(), stockChange, simulatedHp);
-                        else DrawFormatStringToHandle(620, BOTTOM_PANEL_Y + 82, COL_TEXT_SUB(), f22, "¥ ”½‰fI %s ‚Ìƒpƒ[‚ğ [%d] ‚É", targetName.c_str(), simulatedHp);
+                        if (stockChange < 0) DrawFormatStringToHandle(620, BOTTOM_PANEL_Y + 82, COL_DANGER(), f22, "â–¼ æ”»æ’ƒï¼ %s ã®ã€ ãƒãƒƒãƒ†ãƒªãƒ¼ã‚’%d ã€‘ã€ãƒ‘ãƒ¯ãƒ¼ã‚’ [%d] ã«ã—ã¾ã™", targetName.c_str(), stockChange, simulatedHp);
+                        else if (stockChange > 0) DrawFormatStringToHandle(620, BOTTOM_PANEL_Y + 82, COL_SAFE(), f22, "â–¼ å›å¾©ï¼ %s ã®ã€ ãƒãƒƒãƒ†ãƒªãƒ¼ã‚’+%d ã€‘ã€ãƒ‘ãƒ¯ãƒ¼ã‚’ [%d] ã«ã—ã¾ã™", targetName.c_str(), stockChange, simulatedHp);
+                        else DrawFormatStringToHandle(620, BOTTOM_PANEL_Y + 82, COL_TEXT_SUB(), f22, "â–¼ åæ˜ ï¼ %s ã®ãƒ‘ãƒ¯ãƒ¼ã‚’ [%d] ã«", targetName.c_str(), simulatedHp);
 
                         if (disp_aOp == '/') {
                             unsigned int warpCol = isHoverSelf ? COL_SAFE() : COL_DANGER();
-                            if (isCleanDivide) DrawFormatStringToHandle(620, BOTTOM_PANEL_Y + 112, warpCol, f22, "‚³‚ç‚ÉÀ•W(%d, %d)‚Éy%sz‚Ìƒ[ƒvİ’uI", disp_aNum, disp_tNum, targetName.c_str());
-                            else DrawFormatStringToHandle(620, BOTTOM_PANEL_Y + 112, warpCol, f22, "À•W(%d, %d)‚Éy%sz‚Ìƒ[ƒvİ’uI", disp_aNum, disp_tNum, targetName.c_str());
+                            if (isCleanDivide) DrawFormatStringToHandle(620, BOTTOM_PANEL_Y + 112, warpCol, f22, "ã•ã‚‰ã«åº§æ¨™(%d, %d)ã«ã€%sã€‘ã®ãƒ¯ãƒ¼ãƒ—è¨­ç½®ï¼", disp_aNum, disp_tNum, targetName.c_str());
+                            else DrawFormatStringToHandle(620, BOTTOM_PANEL_Y + 112, warpCol, f22, "åº§æ¨™(%d, %d)ã«ã€%sã€‘ã®ãƒ¯ãƒ¼ãƒ—è¨­ç½®ï¼", disp_aNum, disp_tNum, targetName.c_str());
                         }
                     }
                     else {
-                        DrawStringToHandle(770, BOTTOM_PANEL_Y + 82, "”½‰f‚·‚é‘ÎÛ‚ğ‘I‘ğ‚µ‚Ä‚­‚¾‚³‚¢", GetColor(120, 120, 130), f22);
-                        if (disp_aOp == '/') DrawFormatStringToHandle(770, BOTTOM_PANEL_Y + 112, COL_INFO(), f22, "ÀsA‘I‘ğ‚µ‚½‘ÎÛ‚Éƒ[ƒvİ’uI");
+                        DrawStringToHandle(770, BOTTOM_PANEL_Y + 82, "åæ˜ ã™ã‚‹å¯¾è±¡ã‚’é¸æŠã—ã¦ãã ã•ã„", GetColor(120, 120, 130), f22);
+                        if (disp_aOp == '/') DrawFormatStringToHandle(770, BOTTOM_PANEL_Y + 112, COL_INFO(), f22, "å®Ÿè¡Œæ™‚ã€é¸æŠã—ãŸå¯¾è±¡ã«ãƒ¯ãƒ¼ãƒ—è¨­ç½®ï¼");
                     }
                 }
             }
@@ -865,11 +867,11 @@ namespace App {
         else if (master.m_currentPhase == BattleMaster::Phase::P1_Action || master.m_currentPhase == BattleMaster::Phase::P2_Action) {
             int f30 = GetCachedFont(30);
             int f28 = GetCachedFont(28);
-            if (canAttack && !hasOp) { DrawStringToHandle(730, BOTTOM_PANEL_Y + 40, "y ‰‰ZqƒAƒCƒeƒ€‚ª•K—v‚Å‚· z", COL_DANGER(), f30); }
-            else { DrawStringToHandle(800, BOTTOM_PANEL_Y + 40, "ƒ^[ƒQƒbƒg‚ªË’ö“à‚É‚¢‚Ü‚¹‚ñ", COL_DISABLE(), f28); }
+            if (canAttack && !hasOp) { DrawStringToHandle(730, BOTTOM_PANEL_Y + 40, "ã€ æ¼”ç®—å­ã‚¢ã‚¤ãƒ†ãƒ ãŒå¿…è¦ã§ã™ ã€‘", COL_DANGER(), f30); }
+            else { DrawStringToHandle(800, BOTTOM_PANEL_Y + 40, "ã‚¿ãƒ¼ã‚²ãƒƒãƒˆãŒå°„ç¨‹å†…ã«ã„ã¾ã›ã‚“", COL_DISABLE(), f28); }
         }
         else {
-            DrawStringToHandle(760, BOTTOM_PANEL_Y + 40, "ˆÚ“®‚·‚éƒ}ƒX‚ğ‘I‘ğ‚µ‚Ä‚­‚¾‚³‚¢", COL_DISABLE(), GetCachedFont(28));
+            DrawStringToHandle(760, BOTTOM_PANEL_Y + 40, "ç§»å‹•ã™ã‚‹ãƒã‚¹ã‚’é¸æŠã—ã¦ãã ã•ã„", COL_DISABLE(), GetCachedFont(28));
         }
 
         if (master.m_currentPhase == BattleMaster::Phase::P1_Action || master.m_currentPhase == BattleMaster::Phase::P2_Action) {
@@ -890,9 +892,9 @@ namespace App {
                         DrawFormatStringToHandle(x + (w - GetDrawStringWidthToHandle(text, (int)strlen(text), f26)) / 2, y + 22, col, f26, text);
                     }
                     };
-                drawBtn(600, by, 220, 60, "©•ª", COL_SAFE(), isHoverSelf);
-                drawBtn(850, by, 220, 60, "‘Šè", COL_DANGER(), isHoverEnemy);
-                drawBtn(1100, by, 220, 60, "‰½‚à‚µ‚È‚¢", COL_DISABLE(), master.CheckButtonClick(1100, by, 220, 60, mousePos));
+                drawBtn(600, by, 220, 60, "è‡ªåˆ†", COL_SAFE(), isHoverSelf);
+                drawBtn(850, by, 220, 60, "ç›¸æ‰‹", COL_DANGER(), isHoverEnemy);
+                drawBtn(1100, by, 220, 60, "ä½•ã‚‚ã—ãªã„", COL_DISABLE(), master.CheckButtonClick(1100, by, 220, 60, mousePos));
             }
             else {
                 bool hover = master.CheckButtonClick(750, by, 420, 60, mousePos);
@@ -900,17 +902,17 @@ namespace App {
                 int f28 = GetCachedFont(28);
                 if (hover) {
                     DrawBox(750, by, 1170, by + 60, btnCol, TRUE);
-                    DrawStringToHandle(875, by + 16, "ƒ^[ƒ“I—¹", COL_TEXT_DARK(), f28);
+                    DrawStringToHandle(875, by + 16, "ã‚¿ãƒ¼ãƒ³çµ‚äº†", COL_TEXT_DARK(), f28);
                 }
                 else {
                     DrawBox(750, by, 1170, by + 60, GetColor(20, 20, 25), TRUE);
                     DrawBox(750, by, 1170, by + 60, btnCol, FALSE);
-                    DrawStringToHandle(875, by + 16, "ƒ^[ƒ“I—¹", btnCol, f28);
+                    DrawStringToHandle(875, by + 16, "ã‚¿ãƒ¼ãƒ³çµ‚äº†", btnCol, f28);
                 }
             }
         }
         // ==========================================
-        // ‰Eã‚Ì PAUSE(ƒ|[ƒY)ƒ{ƒ^ƒ“•`‰æ
+        // å³ä¸Šã® PAUSE(ãƒãƒ¼ã‚º)ãƒœã‚¿ãƒ³æç”»
         // ==========================================
         int pauseBtnW = 160;
         int pauseBtnH = 50;
@@ -919,17 +921,17 @@ namespace App {
         bool isPauseHover = master.CheckButtonClick(pauseBtnX, pauseBtnY, pauseBtnW, pauseBtnH, mousePos);
         unsigned int pauseCol = isPauseHover ? COL_WARN() : COL_TEXT_OFF();
 
-        // ”wŒi(”¼“§–¾)
+        // èƒŒæ™¯(åŠé€æ˜)
         SetDrawBlendMode(DX_BLENDMODE_ALPHA, isPauseHover ? 200 : 120);
         DrawBox(pauseBtnX, pauseBtnY, pauseBtnX + pauseBtnW, pauseBtnY + pauseBtnH, COL_BG(), TRUE);
         SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
 
-        // ˜gü
+        // æ ç·š
         DrawBox(pauseBtnX, pauseBtnY, pauseBtnX + pauseBtnW, pauseBtnY + pauseBtnH, pauseCol, FALSE);
 
-        // ƒeƒLƒXƒg
+        // ãƒ†ã‚­ã‚¹ãƒˆ
         int f22Btn = GetCachedFont(22);
-        const char* pauseStr = "ƒ|[ƒY (ESC)";
+        const char* pauseStr = "ãƒãƒ¼ã‚º (ESC)";
         int twPause = GetDrawStringWidthToHandle(pauseStr, (int)strlen(pauseStr), f22Btn);
         DrawStringToHandle(pauseBtnX + (pauseBtnW - twPause) / 2, pauseBtnY + 12, pauseStr, pauseCol, f22Btn);
         // ==========================================
@@ -944,13 +946,13 @@ namespace App {
                 SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
 
                 int f160 = GetCachedFont(160);
-                const char* finishText = "ƒQ[ƒ€I—¹ !!";
+                const char* finishText = "ã‚²ãƒ¼ãƒ çµ‚äº† !!";
                 int textW = GetDrawStringWidthToHandle(finishText, (int)strlen(finishText), f160);
                 DrawStringToHandle(SCREEN_W / 2 - textW / 2, SCREEN_H / 2 - 100, finishText, COL_TEXT_MAIN(), f160);
 
                 if (master.m_finishTimer > 30) {
                     int f40 = GetCachedFont(40);
-                    const char* nextText = ">> ƒNƒŠƒbƒN‚µ‚Ä‚­‚¾‚³‚¢ <<";
+                    const char* nextText = ">> ã‚¯ãƒªãƒƒã‚¯ã—ã¦ãã ã•ã„ <<";
                     int nw = GetDrawStringWidthToHandle(nextText, (int)strlen(nextText), f40);
                     DrawStringToHandle(SCREEN_W / 2 - nw / 2, SCREEN_H / 2 + 100, nextText, COL_TEXT_SUB(), f40);
                 }
@@ -1038,8 +1040,142 @@ namespace App {
     int BattleUI::GetCachedFont(int size) {
         static std::unordered_map<int, int> s_fontCache;
         if (s_fontCache.find(size) == s_fontCache.end()) {
-            s_fontCache[size] = CreateFontToHandle("BIZ UDƒSƒVƒbƒN", size, 2, DX_FONTTYPE_ANTIALIASING);
+            s_fontCache[size] = CreateFontToHandle("BIZ UDã‚´ã‚·ãƒƒã‚¯", size, 2, DX_FONTTYPE_ANTIALIASING);
         }
         return s_fontCache[size];
+    }
+
+    // ==========================================
+    // ãƒãƒ¥ãƒ¼ãƒˆãƒªã‚¢ãƒ«ç”¨ã®UIæç”»
+    // ==========================================
+    void BattleUI::Draw(const TutorialMaster& master) const {
+        // 1. ã‚·ã‚§ãƒ¼ãƒ€ãƒ¼èƒŒæ™¯ï¼ˆNullãƒã‚§ãƒƒã‚¯ã®å®‰å…¨å¯¾ç­–æ¸ˆã¿ï¼ï¼‰
+        if (m_psHandle != -1 && m_cbHandle != -1) {
+            float* cb = (float*)GetBufferShaderConstantBuffer(m_cbHandle);
+            if (cb != nullptr) {
+                cb[0] = m_shaderTime;
+                cb[1] = SCREEN_W;
+                cb[2] = SCREEN_H;
+                cb[3] = 0.0f;
+                UpdateShaderConstantBuffer(m_cbHandle);
+                SetShaderConstantBuffer(m_cbHandle, DX_SHADERTYPE_PIXEL, 0);
+
+                SetUsePixelShader(m_psHandle);
+                VERTEX2DSHADER v[6];
+                for (int i = 0; i < 6; ++i) {
+                    v[i].pos = VGet(0, 0, 0); v[i].rhw = 1.0f;
+                    v[i].dif = GetColorU8(255, 255, 255, 255);
+                    v[i].spc = GetColorU8(0, 0, 0, 0);
+                    v[i].u = 0.0f; v[i].v = 0.0f;
+                }
+                v[0].pos.x = 0;        v[0].pos.y = 0;        v[0].u = 0.0f; v[0].v = 0.0f;
+                v[1].pos.x = SCREEN_W; v[1].pos.y = 0;        v[1].u = 1.0f; v[1].v = 0.0f;
+                v[2].pos.x = 0;        v[2].pos.y = SCREEN_H; v[2].u = 0.0f; v[2].v = 1.0f;
+                v[3].pos.x = SCREEN_W; v[3].pos.y = 0;        v[3].u = 1.0f; v[3].v = 0.0f;
+                v[4].pos.x = SCREEN_W; v[4].pos.y = SCREEN_H; v[4].u = 1.0f; v[4].v = 1.0f;
+                v[5].pos.x = 0;        v[5].pos.y = SCREEN_H; v[5].u = 0.0f; v[5].v = 1.0f;
+                DrawPrimitive2DToShader(v, 6, DX_PRIMTYPE_TRIANGLELIST);
+                SetUsePixelShader(-1);
+            }
+            else {
+                DrawBox(0, 0, SCREEN_W, SCREEN_H, COL_BG(), TRUE);
+            }
+        }
+        else {
+            DrawBox(0, 0, SCREEN_W, SCREEN_H, COL_BG(), TRUE);
+        }
+
+        // 2. ã‚µã‚¤ãƒ‰ãƒ‘ãƒãƒ«æç”»
+        SetDrawBlendMode(DX_BLENDMODE_ALPHA, 200);
+        DrawBox(0, HEADER_H, 580, SCREEN_H, COL_PANEL_BG(), TRUE);
+        DrawBox(576, HEADER_H, 580, SCREEN_H, COL_P1(), TRUE);
+
+        DrawBox(1340, HEADER_H, SCREEN_W, SCREEN_H, COL_PANEL_BG(), TRUE);
+        DrawBox(1340, HEADER_H, 1344, SCREEN_H, COL_P2(), TRUE);
+        SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+
+        // 3. ãƒãƒƒãƒ—ã¨ã‚­ãƒ£ãƒ©ã‚¯ã‚¿ãƒ¼æç”» (TutorialMasterã®ãƒ‡ãƒ¼ã‚¿ã‚’ä½¿ç”¨)
+        master.m_mapGrid.Draw();
+        if (master.m_player) master.m_player->Draw();
+        if (master.m_enemy)  master.m_enemy->Draw();
+
+        // 4. ãƒ˜ãƒƒãƒ€ãƒ¼æç”»
+        DrawBox(0, 0, SCREEN_W, HEADER_H, COL_INFO(), TRUE);
+        DrawLine(0, HEADER_H, SCREEN_W, HEADER_H, COL_TEXT_MAIN(), 2);
+        DrawFormatStringToHandle(40, 16, COL_TEXT_MAIN(), GetCachedFont(38), ">>> ãƒãƒ¥ãƒ¼ãƒˆãƒªã‚¢ãƒ«");
+
+        // 5. ã‚·ãƒ³ãƒ—ãƒ«ãªãƒ¦ãƒ‹ãƒƒãƒˆã‚«ãƒ¼ãƒ‰æç”» (ãƒ—ãƒ¬ãƒ“ãƒ¥ãƒ¼ä¸è¦ãªã®ã§è»½é‡åŒ–)
+        auto drawSimpleUnitCard = [&](int x, int y, UnitBase* unit, bool is1P) {
+            if (!unit) return;
+            unsigned int baseCol = is1P ? COL_P1() : COL_P2();
+            std::string headerName = is1P ? "1P (YOU)" : "2P (ENEMY)";
+
+            DrawStringToHandle(x + 5, y + 5, headerName.c_str(), baseCol, GetCachedFont(36));
+            DrawLine(x, y + 45, x + 500, y + 45, baseCol, 2);
+
+            int powerY = y + 70;
+            DrawBox(x, powerY, x + 500, powerY + 120, COL_DARK_BG(), TRUE);
+            DrawStringToHandle(x + 15, powerY + 10, "ãƒ‘ãƒ¯ãƒ¼", COL_WARN(), GetCachedFont(24));
+
+            int currentNum = unit->GetNumber();
+            int f32Num = GetCachedFont(32);
+            for (int i = 1; i <= 9; ++i) {
+                int px = x + 40 + (i - 1) * 48;
+                int py = powerY + 43;
+                unsigned int numCol = (i == currentNum) ? COL_SAFE() : GetColor(70, 70, 80);
+                std::string numStr = std::to_string(i);
+                int tw = GetDrawStringWidthToHandle(numStr.c_str(), 1, f32Num);
+                DrawStringToHandle(px - tw / 2, py + 6, numStr.c_str(), numCol, f32Num);
+            }
+
+            int infoY = powerY + 160;
+            DrawBox(x, infoY, x + 500, infoY + 120, COL_DARK_BG(), TRUE);
+            DrawStringToHandle(x + 20, infoY + 18, "ãƒãƒƒãƒ†ãƒªãƒ¼", GetColor(180, 180, 180), GetCachedFont(22));
+
+            int currentStocks = unit->GetStocks();
+            for (int i = 0; i < unit->GetMaxStocks(); ++i) {
+                int sx = x + 130 + i * 55;
+                int sy = infoY + 8;
+                if (i < currentStocks) {
+                    DrawBox(sx, sy, sx + 40, sy + 38, baseCol, TRUE);
+                }
+                else {
+                    DrawBox(sx, sy, sx + 40, sy + 38, GetColor(60, 60, 70), FALSE);
+                }
+            }
+            };
+
+        drawSimpleUnitCard(40, 100, master.m_player.get(), true);
+        drawSimpleUnitCard(1380, 100, master.m_enemy.get(), false);
+
+        // 6. ãƒ­ã‚°ãƒ‘ãƒãƒ«æç”»
+        int f22 = GetCachedFont(22);
+        int f20 = GetCachedFont(20);
+        DrawLine(40, LOG_PANEL_Y, 540, LOG_PANEL_Y, GetColor(60, 60, 70), 1);
+        DrawStringToHandle(40, LOG_PANEL_Y + 10, "ãƒ­ã‚°", COL_DISABLE(), f22);
+
+        int maxLogOffset = std::max(0, (int)m_actionLog.size() - 6);
+        if (maxLogOffset > 0) {
+            DrawBox(530, LOG_PANEL_Y + 45, 535, LOG_PANEL_Y + 195, GetColor(30, 30, 40), TRUE);
+            float scrollRatio = (float)m_logScrollOffset / maxLogOffset;
+            int thumbY = LOG_PANEL_Y + 45 + (int)(scrollRatio * (150 - 30));
+            DrawBox(530, thumbY, 535, thumbY + 30, GetColor(100, 150, 200), TRUE);
+        }
+
+        int startIdx = m_logScrollOffset;
+        int endIdx = std::min((int)m_actionLog.size(), startIdx + 6);
+        for (int i = startIdx; i < endIdx; ++i) {
+            int drawY = LOG_PANEL_Y + 45 + (i - startIdx) * 26;
+            DrawFormatStringToHandle(40, drawY, GetColor(180, 220, 160), f20, "%s", m_actionLog[i].c_str());
+        }
+
+        // 7. ä¸‹éƒ¨ãƒ‘ãƒãƒ«æç”»ï¼ˆæ“ä½œã‚¬ã‚¤ãƒ‰ï¼‰
+        SetDrawBlendMode(DX_BLENDMODE_ALPHA, 200);
+        DrawBox(600, BOTTOM_PANEL_Y, 1320, 940, COL_BOTTOM_BG(), TRUE);
+        SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+        DrawLine(600, BOTTOM_PANEL_Y, 1320, BOTTOM_PANEL_Y, COL_INFO(), 2);
+
+        DrawStringToHandle(620, BOTTOM_PANEL_Y + 30, "ä¸­å¤®ã®ãƒ¡ãƒƒã‚»ãƒ¼ã‚¸ã‚¦ã‚£ãƒ³ãƒ‰ã‚¦ã®æŒ‡ç¤ºã«å¾“ã£ã¦æ“ä½œã—ã¦ãã ã•ã„ã€‚", COL_TEXT_MAIN(), f22);
+
     }
 }

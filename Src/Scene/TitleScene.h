@@ -1,113 +1,118 @@
 #pragma once
 #include "SceneBase.h"
+#include <vector>
+#include <string>
 
 namespace App {
 
     // ==========================================
     // TitleScene: タイトル画面のシーン
-    // 用途: ゲーム設定（モード・プレイヤー・ステージ選択）
-    // 継承: SceneBaseのライフサイクルを実装
+    // 用途: メニュー階層管理とゲーム設定
     // ==========================================
     class TitleScene : public SceneBase {
     public:
         // ==========================================
-        // MenuState: メニュー階層の状態
-        // タイトル画面の多段階メニューを管理
+        // TitleState: 大枠のメニュー画面の状態
         // ==========================================
-        enum class MenuState {
-            PRESS_START,            // [1] スタート画面
-            SELECT_PLAYERS,         // [2] プレイヤー数選択（シングル/2P）
-            SELECT_MODE,            // [3] モード選択（クラシック/ゼロワン）
-            SELECT_CLASSIC_STOCKS,  // [4a] 残機設定（クラシック専用）
-            SELECT_SCORE,           // [4b] 目標スコア設定（ゼロワン専用）
-            SELECT_P1_TYPE,         // [5] 1P操作設定（プレイヤー/NPC）
-            SELECT_P2_TYPE,         // [6] 2P操作設定（プレイヤー/NPC）
-            SELECT_STAGE,           // [7] ステージ選択
-            CUSTOM_P1_START,        // [8] 1Pカスタム設定（体力・座標）
-            CUSTOM_P2_START         // [9] 2Pカスタム設定→ゲーム開始
+        enum class TitleState {
+            PRESS_START,    // [0] タイトルコール（スペースを押してね）
+            MAIN_MENU,      // [1] トップメニュー（バトル、通信、チュートリアル等）
+            BATTLE_SETUP,   // [2] オフラインバトルの詳細設定
+            NETWORK_SETUP,  // [3] ★新規：通信対戦のマッチング画面
+            OPTION_MENU,    // [4] オプション・クレジット画面
+            EXIT_CONFIRM    // [5] 終了確認画面
         };
 
         // ==========================================
-        // コンストラクタ・デストラクタ
+        // SetupStep: オフラインバトル設定内の進行ステップ
         // ==========================================
+        enum class SetupStep {
+            SELECT_PLAYERS,         // シングル / 2P
+            SELECT_MODE,            // クラシック / ゼロワン
+            SELECT_CLASSIC_STOCKS,  // 残機設定
+            SELECT_SCORE,           // 目標スコア設定
+            SELECT_P1_TYPE,         // 1P操作（プレイヤー/NPC）
+            SELECT_P2_TYPE,         // 2P操作（プレイヤー/NPC）
+            SELECT_STAGE,           // ステージ選択
+            CUSTOM_P1_START,        // 1P初期位置
+            CUSTOM_P2_START         // 2P初期位置
+        };
+
+        // ==========================================
+        // NetSetupStep: 通信対戦マッチングの進行ステップ
+        // ==========================================
+        enum class NetSetupStep {
+            SELECT_ROLE,      // ホストになるか、クライアントになるか
+            HOST_WAITING,     // ホストとして待機中（UDP送信中）
+            CLIENT_SEARCHING  // クライアントとして部屋を検索中（UDP受信中）
+        };
+
         TitleScene();
         ~TitleScene() override;
 
-        // ==========================================
-        // シーンライフサイクル
-        // ==========================================
-        void Init() override;       // 初期化
-        void Load() override;       // リソース読み込み
-        void LoadEnd() override;    // 読み込み完了処理
-        void Update() override;     // 更新（入力受付・メニュー遷移）
-        void Draw() override;       // 描画（背景・メニュー・プレビュー）
-        void Release() override;    // 解放
+        void Init() override;
+        void Load() override;
+        void LoadEnd() override;
+        void Update() override;
+        void Draw() override;
+        void Release() override;
 
     private:
-        // ==========================================
-        // 定数: ゲームルールのデフォルト値
-        // ==========================================
-        static constexpr int GRID_SIZE = 9;      // グリッドサイズ（9x9）
+        static constexpr int GRID_SIZE = 9;
 
-        static constexpr int DEF_P1_HP = 5;      // 1P初期体力
-        static constexpr int DEF_P1_X = 3;       // 1P初期X座標
-        static constexpr int DEF_P1_Y = 3;       // 1P初期Y座標
+        static constexpr int DEF_P1_HP = 5;
+        static constexpr int DEF_P1_X = 3;
+        static constexpr int DEF_P1_Y = 3;
 
-        static constexpr int DEF_P2_HP = 5;      // 2P初期体力
-        static constexpr int DEF_P2_X = 7;       // 2P初期X座標
-        static constexpr int DEF_P2_Y = 7;       // 2P初期Y座標
+        static constexpr int DEF_P2_HP = 5;
+        static constexpr int DEF_P2_X = 7;
+        static constexpr int DEF_P2_Y = 7;
 
-        // ==========================================
-        // PlayerConfig: プレイヤー設定構造体
-        // 1P・2Pの設定をまとめて管理
-        // ==========================================
         struct PlayerConfig {
-            int typeCursor;      // 操作タイプ（0=プレイヤー, 1=NPC）
-            int customCursor;    // カスタム設定カーソル（0=体力, 1=X, 2=Y, 3=決定）
-            int startNum;        // 初期体力
-            int startX;          // 初期X座標（1～9）
-            int startY;          // 初期Y座標（1～9）
+            int typeCursor;
+            int customCursor;
+            int startNum;
+            int startX;
+            int startY;
         };
 
         // ==========================================
-        // メニュー状態
+        // 状態管理・カーソル
         // ==========================================
-        MenuState m_state;           // 現在のメニュー状態
-        int m_frameCount;            // フレームカウンター
+        TitleState m_titleState;
+        SetupStep m_setupStep;
+        NetSetupStep m_netStep; // ★通信マッチング用のステート
+        int m_frameCount;
+
+        int m_mainMenuCursor;       // トップメニューのカーソル
+        int m_exitCursor;           // 終了確認のカーソル
+
+        // バトル設定用のカーソル
+        int m_playerCursor;
+        int m_modeCursor;
+        int m_stocksCursor;
+        int m_scoreCursor;
+        int m_stageCursor;
+
+        // 通信マッチング用のカーソル
+        int m_netRoleCursor;
+        int m_hostListCursor;
+
+        PlayerConfig m_players[2];
+
+        bool m_shouldQuit;
 
         // ==========================================
-        // カーソル位置（各メニュー画面）
+        // リソースハンドル
         // ==========================================
-        int m_playerCursor;          // プレイヤー数カーソル（1=シングル, 2=2P）
-        int m_modeCursor;            // モードカーソル（0=クラシック, 1=ゼロワン）
-        int m_stocksCursor;          // 残機カーソル（0,1,2）
-        int m_scoreCursor;           // スコアカーソル（0,1,2）
-        int m_stageCursor;           // ステージカーソル（0,1,2）
+        int m_fontTitle;
+        int m_fontMenu;
+        int m_fontSmall;
+        int m_fontNumber;
 
-        // ==========================================
-        // プレイヤー設定
-        // ==========================================
-        PlayerConfig m_players[2];   // [0]=1P, [1]=2P
-
-        // ==========================================
-        // 終了フラグ
-        // ==========================================
-        bool m_shouldQuit;           // ESCキーでゲーム終了
-
-        // ==========================================
-        // フォントハンドル
-        // ==========================================
-        int m_fontTitle;             // タイトルロゴ用
-        int m_fontMenu;              // メニュー項目用
-        int m_fontSmall;             // 小さい文字用
-        int m_fontNumber;            // 数値表示用
-
-        // ==========================================
-        // シェーダーハンドル（背景エフェクト）
-        // ==========================================
-        int m_psHandle;              // ピクセルシェーダー
-        int m_cbHandle;              // 定数バッファ
-        float m_shaderTime;          // シェーダー時間（アニメーション用）
+        int m_psHandle = -1;
+        int m_cbHandle = -1;
+        float m_shaderTime;
     };
 
 } // namespace App
