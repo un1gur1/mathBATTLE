@@ -175,6 +175,10 @@ namespace App {
         // 画面モード変更時にグラフィックスをリセットしない
         SetChangeScreenModeGraphicsSystemResetFlag(FALSE);
 
+        SetDoubleStartValidFlag(TRUE); // ゲームを2つ同時に起動できるようにする
+        SetAlwaysRunFlag(TRUE);        // ウィンドウが裏に回っても処理を止めない（通信切断防止）
+        SetOutApplicationLogValidFlag(FALSE); // Log.txtの書き込みが2つのアプリで衝突して落ちるのを防ぐ
+
         // DXライブラリの初期化
         if (DxLib_Init() == -1) return false;
         // ProceduralAudioの初期化
