@@ -2,6 +2,7 @@
 #include "SceneBase.h"
 #include <vector>
 #include <string>
+#include"../Manager/AccumulationCalc.h"
 
 namespace App {
 
@@ -115,6 +116,8 @@ namespace App {
         int m_psHandle = -1;
         int m_cbHandle = -1;
         float m_shaderTime;
+
+        AccumulationCalc m_miniGame;
     };
 
 } // namespace App

@@ -1163,18 +1163,33 @@ namespace App {
             return m_isBattleFinished;
         }
     }
+
     bool BattleMaster::IsPlayerWin() const {
         if (!m_player || !m_enemy) return false;
 
+        bool is1PWin = false;
+
+        // まず「1Pが勝ったのかどうか」を判定
         if (m_ruleMode == RuleMode::ZERO_ONE) {
             Fraction goal(m_targetScore);
-            return (m_p1ZeroOneScore == goal);
+            is1PWin = (m_p1ZeroOneScore == goal);
         }
         else {
-            return m_is1PWinner;
+            is1PWin = m_is1PWinner;
         }
-    }
-    bool BattleMaster::CheckButtonClick(int x, int y, int w, int h, const Vector2& mousePos) const {
+
+        // 通信対戦中の場合、自分がクライアント(2P)なら勝敗を反転させる！
+        bool isOnline = (NetworkManager::GetInstance() != nullptr && NetworkManager::GetInstance()->GetState() == NetworkManager::State::CONNECTED);
+        if (isOnline) {
+            bool isHost = NetworkManager::GetInstance()->IsHost();
+            if (!isHost) {
+                // 自分が2Pなら、1Pが勝った＝自分の負け(!is1PWin)
+                return !is1PWin;
+            }
+        }
+
+        return is1PWin;
+    }    bool BattleMaster::CheckButtonClick(int x, int y, int w, int h, const Vector2& mousePos) const {
         return (mousePos.x >= static_cast<float>(x) && mousePos.x <= static_cast<float>(x + w) &&
             mousePos.y >= static_cast<float>(y) && mousePos.y <= static_cast<float>(y + h));
     }

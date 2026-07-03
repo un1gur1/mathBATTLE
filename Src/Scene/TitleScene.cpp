@@ -111,7 +111,7 @@ namespace App {
         m_psHandle = LoadPixelShaderFromMem(g_ps_CyberGrid, sizeof(g_ps_CyberGrid));
         m_cbHandle = CreateShaderConstantBuffer(sizeof(float) * 4);
         m_shaderTime = 0.0f;
-
+        m_miniGame.Clear();
         // ★ 通信マネージャーの初期化保証
         if (NetworkManager::GetInstance() == nullptr) {
             NetworkManager::CreateInstance();
@@ -307,6 +307,9 @@ namespace App {
         case NetSetupStep::CLIENT_WAIT_SETUP:
         {
             SetupPacket packet;
+
+            m_miniGame.Update();
+
             // パケットが届いたか監視する
             if (NetworkManager::GetInstance()->ReceiveSetupPacket(packet)) {
                 ProceduralAudio::GetInstance().PlayPowerSE(9);
@@ -323,7 +326,6 @@ namespace App {
                     int finalScore = TARGET_SCORES[packet.scoreCursor];
                     sm->SetGameSettings(2, packet.modeCursor, finalScore);
                 }
-
                 // 座標と初期パワーの登録 (引数の数と型を確実に合わせる)
                 sm->SetPlayer1Settings(false, packet.p1StartNum, packet.p1StartX - 1, GRID_SIZE - packet.p1StartY);
                 sm->SetPlayer2Settings(false, packet.p2StartNum, packet.p2StartX - 1, GRID_SIZE - packet.p2StartY);
@@ -734,7 +736,9 @@ namespace App {
             {
                 const char* msg = "ホストがゲームルールを設定中です...";
                 int msgW = GetDrawStringWidthToHandle(msg, (int)strlen(msg), m_fontMenu);
-                DrawStringToHandle(CX - msgW / 2, CY, msg, COL_TEXT_SUB(), m_fontMenu);
+                DrawStringToHandle(CX - msgW / 2, CY - 250, msg, COL_TEXT_SUB(), m_fontMenu);
+
+                m_miniGame.Draw();
                 break;
             }
             case NetSetupStep::SELECT_ROLE:
