@@ -219,6 +219,55 @@ namespace App {
             }
         }
 
+        // ==========================================
+        // ★ 追加：ターン開始カットイン演出
+        // ==========================================
+        if (master.m_currentPhase == BattleMaster::Phase::P1_TurnStart || master.m_currentPhase == BattleMaster::Phase::P2_TurnStart) {
+            bool is1P = (master.m_currentPhase == BattleMaster::Phase::P1_TurnStart);
+            int timer = master.GetTurnStartTimer();
+
+            // ① 全体を暗転させる
+            int darkAlpha = (timer > 60) ? (80 - timer) * 7 : ((timer < 20) ? timer * 7 : 140);
+            SetDrawBlendMode(DX_BLENDMODE_ALPHA, darkAlpha);
+            DrawBox(0, 0, SCREEN_W, SCREEN_H, GetColor(0, 0, 0), TRUE);
+            SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+
+            // ② 中央に広がる帯（スリット）の描画
+            int bandH = 160;
+            unsigned int bandCol = is1P ? COL_P1() : COL_P2();
+
+            float scale = 1.0f;
+            if (timer > 70) scale = (80 - timer) / 10.0f; // 開くアニメーション
+            else if (timer < 10) scale = std::max(0.0f, timer / 10.0f); // 閉じるアニメーション
+
+            int currentH = (int)(bandH * scale);
+            int currentY = SCREEN_H / 2 - currentH / 2;
+
+            if (currentH > 0) {
+                SetDrawBlendMode(DX_BLENDMODE_ALPHA, 200);
+                DrawBox(0, currentY, SCREEN_W, currentY + currentH, GetColor(15, 20, 25), TRUE);
+                SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+
+                DrawLine(0, currentY, SCREEN_W, currentY, bandCol, 3);
+                DrawLine(0, currentY + currentH, SCREEN_W, currentY + currentH, bandCol, 3);
+            }
+
+            // ③ テキストの描画（少しずつ右に流れるエフェクト）
+            if (timer <= 75 && timer >= 5) {
+                int f80 = GetCachedFont(80);
+                std::string text = is1P ? (master.m_is1P_NPC ? "1P (COM) TURN" : "1P TURN") : (master.m_is2P_NPC ? "2P (COM) TURN" : "2P TURN");
+                int tw = GetDrawStringWidthToHandle(text.c_str(), (int)text.length(), f80);
+
+                int textX = SCREEN_W / 2 - tw / 2 + (40 - timer); // 少しずつ右にスライド
+                int textY = SCREEN_H / 2 - 40;
+
+                SetDrawBlendMode(DX_BLENDMODE_ADD, 200);
+                DrawStringToHandle(textX - 4, textY, text.c_str(), bandCol, f80);
+                DrawStringToHandle(textX + 4, textY, text.c_str(), bandCol, f80);
+                SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+                DrawStringToHandle(textX, textY, text.c_str(), COL_TEXT_MAIN(), f80);
+            }
+        }
         IntVector2 aP = activeActor ? activeActor->GetGridPos() : IntVector2{ -1,-1 };
         IntVector2 tP = activeTarget ? activeTarget->GetGridPos() : IntVector2{ -1,-1 };
         bool canAttack = activeTarget && (std::abs(aP.x - tP.x) + std::abs(aP.y - tP.y) == 1);
@@ -402,16 +451,19 @@ namespace App {
 
                 DrawStringToHandle(x + 10, scoreY + 5, "現在のスコア", COL_TEXT_SUB(), GetCachedFont(18));
 
+                int displayScore = is1P ? master.GetP1DisplayScore() : master.GetP2DisplayScore();
+
                 if (f.d == 1) {
                     int f100 = GetCachedFont(100);
-                    std::string nStr = std::to_string(f.n);
+                    // ★ 変更：f.n（実際のスコア）ではなく、displayScore（動いている数字）を描画する
+                    std::string nStr = std::to_string(displayScore);
                     DrawStringToHandle(x + 24, scoreY + 24, nStr.c_str(), COL_TEXT_DARK(), f100);
                     DrawStringToHandle(x + 20, scoreY + 20, nStr.c_str(), COL_TEXT_MAIN(), f100);
                 }
                 else {
                     unsigned int fracCol = is1P ? GetColor(255, 220, 100) : GetColor(180, 220, 255);
                     int f60 = GetCachedFont(60);
-                    std::string nStr = std::to_string(f.n);
+                    std::string nStr = std::to_string(displayScore);
                     std::string dStr = std::to_string(f.d);
                     int nw = GetDrawStringWidthToHandle(nStr.c_str(), (int)nStr.length(), f60);
                     int dw = GetDrawStringWidthToHandle(dStr.c_str(), (int)dStr.length(), f60);

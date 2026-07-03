@@ -94,14 +94,14 @@ namespace App {
 
     public:
         enum class Phase {
+            P1_TurnStart, 
             P1_Move,
             P1_Action,
+            P2_TurnStart, 
             P2_Move,
             P2_Action,
-            Result,
             FINISH
         };
-
         enum class GameMode {
             VS_CPU,
             VS_PLAYER
@@ -124,6 +124,11 @@ namespace App {
 
         const MapGrid& GetMapGrid() const { return m_mapGrid; }
         MapGrid& GetMapGrid() { return m_mapGrid; }
+
+        int GetP1DisplayScore() const { return static_cast<int>(m_p1DisplayScore); }
+        int GetP2DisplayScore() const { return static_cast<int>(m_p2DisplayScore); }
+
+        int GetTurnStartTimer() const { return m_turnStartTimer; }
 
     private:
         // ---------- ターン / ルール状態 ----------
@@ -167,6 +172,9 @@ namespace App {
         bool m_isBattleFinished = false;
         bool m_is1PWinner = false;
 
+        float m_p1DisplayScore; // ★追加：1Pの表示用スコア（小数点つきで滑らかに動かす用）
+        float m_p2DisplayScore; // ★追加：2Pの表示用スコア
+
         // ---------- 演出 ----------
         int   m_finishTimer;
         int   m_psHandle;
@@ -183,6 +191,9 @@ namespace App {
         int m_startTime;
         std::vector<std::string> m_actionLog;
 
+        int m_turnStartTimer; // カットイン演出用のタイマー
+        int m_aiWaitTimer;    // AIの思考時間（ウェイト）用タイマー
+
         // ---------- ターン補助 ----------
         bool Is1PTurn() const;
         UnitBase* GetActiveUnit() const;
@@ -191,7 +202,7 @@ namespace App {
 
         void ReserveOperatorUpkeepIfNeeded(UnitBase& unit, bool is1P);
         void ApplyOperatorUpkeepCost(bool is1P);
-        void FinishActionPhase(bool is1P, Phase nextTurnPhase);
+        void FinishActionPhase(bool is1P);
         void AddPowerWithBattery(UnitBase& unit, int delta, const std::string& reason);
         void SetClassicDefeat(UnitBase& loser, const std::string& reason);
 

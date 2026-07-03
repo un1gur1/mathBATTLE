@@ -96,7 +96,7 @@ namespace App {
     }
 
     bool BattleMaster::Is1PTurn() const {
-        return (m_currentPhase == Phase::P1_Move || m_currentPhase == Phase::P1_Action);
+        return (m_currentPhase == Phase::P1_TurnStart || m_currentPhase == Phase::P1_Move || m_currentPhase == Phase::P1_Action);
     }
     UnitBase* BattleMaster::GetActiveUnit()const {
         return Is1PTurn() ? static_cast<UnitBase*>(m_player.get()) : static_cast<UnitBase*>(m_enemy.get());
@@ -139,13 +139,17 @@ namespace App {
         pending = false;
     }
 
-    void BattleMaster::FinishActionPhase(bool is1P, Phase nextTurnPhase) {
+    void BattleMaster::FinishActionPhase(bool is1P) {
         ApplyOperatorUpkeepCost(is1P);
 
-        m_currentPhase = nextTurnPhase;
         if (!is1P) {
             m_mapGrid.UpdateTurn();
         }
+
+        // ★ 修正：Moveではなく、必ず「TurnStart（カットイン）」フェーズへ移行する
+        m_currentPhase = is1P ? Phase::P2_TurnStart : Phase::P1_TurnStart;
+        m_turnStartTimer = 80;
+        m_aiWaitTimer = 45;
     }
 
     void BattleMaster::Init() {
@@ -157,6 +161,10 @@ namespace App {
         m_targetScore = sm->GetZeroOneScore();
         m_p1ZeroOneScore = Fraction(0, 1);
         m_p2ZeroOneScore = Fraction(0, 1);
+
+        // ★ 新規：表示用スコアの初期化
+        m_p1DisplayScore = 0.0f;
+        m_p2DisplayScore = 0.0f;
 
         m_is1P_NPC = sm->Is1PNPC();
         m_is2P_NPC = sm->Is2PNPC();
@@ -197,6 +205,9 @@ namespace App {
         m_isBattleFinished = false;
         m_is1PWinner = false;
 
+        m_currentPhase = Phase::P1_TurnStart;
+        m_turnStartTimer = 80; // 約1.3秒のカットイン演出
+        m_aiWaitTimer = 45;    // AIの初回思考時間
         m_ui = std::make_unique<BattleUI>();
         m_ui->Init();
         int stageIdx = sm->GetStageIndex();
@@ -243,16 +254,12 @@ namespace App {
         return false;
     }
 
-    // ==========================================
-    // ★ 修正: 通信対応の移動処理
-    // ==========================================
     void BattleMaster::HandleMoveInput(UnitBase& activeUnit, Phase nextPhase) {
         if (activeUnit.IsMoving()) return;
 
         bool isClick = false;
         Vector2 mousePos;
 
-        // 通信対戦の判定（自分が操作できるターンか？）
         bool isOnline = (NetworkManager::GetInstance() != nullptr && NetworkManager::GetInstance()->GetState() == NetworkManager::State::CONNECTED);
         bool isMyTurn = true;
         if (isOnline) {
@@ -262,7 +269,6 @@ namespace App {
 
         if (isOnline) {
             if (isMyTurn) {
-                // 自分のターン：普通にマウス入力を受け取り、クリックされたら送信！
                 auto& input = InputManager::GetInstance();
                 if (input.IsMouseLeftTrg()) {
                     isClick = true;
@@ -276,7 +282,6 @@ namespace App {
                 }
             }
             else {
-                // 相手のターン：マウス入力は無効化し、パケットが届くのを待つ！
                 BattlePacket packet;
                 if (NetworkManager::GetInstance()->ReceiveBattlePacket(packet)) {
                     isClick = true;
@@ -285,7 +290,6 @@ namespace App {
             }
         }
         else {
-            // オフライン（ローカル）
             auto& input = InputManager::GetInstance();
             if (input.IsMouseLeftTrg()) {
                 isClick = true;
@@ -293,7 +297,6 @@ namespace App {
             }
         }
 
-        // 誰もクリックしていない(またはパケットが届いていない)なら何もしない
         if (!isClick) return;
 
         IntVector2 targetGrid = m_mapGrid.ScreenToGrid(mousePos);
@@ -356,9 +359,6 @@ namespace App {
         m_currentPhase = nextPhase;
     }
 
-    // ==========================================
-    // ★ 修正: 通信対応の攻撃・反映フェーズ
-    // ==========================================
     void BattleMaster::HandleActionInput(UnitBase& actor, UnitBase& targetUnit) {
         if (actor.IsMoving()) return;
 
@@ -384,14 +384,13 @@ namespace App {
 
         if (!canAttack || !hasOp) {
             AddLog("【待機】 行動を終了");
-            FinishActionPhase(is1P, nextTurnPhase);
+            FinishActionPhase(is1P);
             return;
         }
 
         bool isClick = false;
         Vector2 mousePos;
 
-        // 通信対戦の判定
         bool isOnline = (NetworkManager::GetInstance() != nullptr && NetworkManager::GetInstance()->GetState() == NetworkManager::State::CONNECTED);
         bool isMyTurn = true;
         if (isOnline) {
@@ -401,7 +400,6 @@ namespace App {
 
         if (isOnline) {
             if (isMyTurn) {
-                // 自分のターン
                 auto& input = InputManager::GetInstance();
                 if (input.IsMouseLeftTrg()) {
                     isClick = true;
@@ -415,7 +413,6 @@ namespace App {
                 }
             }
             else {
-                // 相手のターン
                 BattlePacket packet;
                 if (NetworkManager::GetInstance()->ReceiveBattlePacket(packet)) {
                     isClick = true;
@@ -424,7 +421,6 @@ namespace App {
             }
         }
         else {
-            // オフライン
             auto& input = InputManager::GetInstance();
             if (input.IsMouseLeftTrg()) {
                 isClick = true;
@@ -460,7 +456,7 @@ namespace App {
         }
 
         if (actionDone) {
-            FinishActionPhase(is1P, nextTurnPhase);
+            FinishActionPhase(is1P);
         }
     }
 
@@ -531,7 +527,7 @@ namespace App {
                 if (myOp == '/') targetMeIsBetter = true;
                 else {
                     auto calcDmg = [](int currentHp, int currentStocks, int val, int& outHp, int& outStocks) {
-                        (void)currentHp; // 書き換え式では現在値を使わない
+                        (void)currentHp;
 
                         outHp = val;
                         outStocks = currentStocks;
@@ -573,10 +569,14 @@ namespace App {
             ProceduralAudio::GetInstance().PlayPowerSE(2);
         }
 
+        FinishActionPhase(is1P);
 
-        FinishActionPhase(is1P, is1P ? Phase::P2_Move : Phase::P1_Move);
-        if (is1P) m_playerAIStarted = false;
-        else m_enemyAIStarted = false;
+        if (is1P) {
+            m_playerAIStarted = false;
+        }
+        else {
+            m_enemyAIStarted = false;
+        }
     }
 
     void BattleMaster::Update() {
@@ -623,38 +623,78 @@ namespace App {
         m_shaderTime += 0.0016f + (0.01f * m_effectIntensity);
         if (m_effectIntensity > 0.0f) m_effectIntensity -= 0.05f;
 
+        // ==========================================
+        // ★ 新規: スコアのイージング（高速カウントアップ/ダウン）
+        // ==========================================
+        if (m_ruleMode == RuleMode::ZERO_ONE) {
+            // 実際の内部スコアを取得
+            float target1P = (float)(m_p1ZeroOneScore.n / m_p1ZeroOneScore.d);
+            float target2P = (float)(m_p2ZeroOneScore.n / m_p2ZeroOneScore.d);
+
+            // 毎フレーム15%ずつ目標値に近づく（シュバババッ！というアニメーション）
+            m_p1DisplayScore += (target1P - m_p1DisplayScore) * 0.15f;
+            m_p2DisplayScore += (target2P - m_p2DisplayScore) * 0.15f;
+
+            // 誤差が0.5未満になったらピタリと合わせる
+            if (std::abs(target1P - m_p1DisplayScore) < 0.5f) m_p1DisplayScore = target1P;
+            if (std::abs(target2P - m_p2DisplayScore) < 0.5f) m_p2DisplayScore = target2P;
+        }
+        // ==========================================
+
         switch (m_currentPhase) {
-        case Phase::P1_Move:
-            if (m_player) {
-                ReserveOperatorUpkeepIfNeeded(*m_player, true);
+        case Phase::P1_TurnStart:
+        case Phase::P2_TurnStart:
+            m_turnStartTimer--;
+            if (m_turnStartTimer <= 0) {
+                m_currentPhase = (m_currentPhase == Phase::P1_TurnStart) ? Phase::P1_Move : Phase::P2_Move;
             }
+            break;
+
+        case Phase::P1_Move:
+            if (m_player) ReserveOperatorUpkeepIfNeeded(*m_player, true);
 
             if (m_is1P_NPC) {
-                if (!m_playerAIStarted) { ExecuteAI(m_player.get(), m_enemy.get(), true); m_playerAIStarted = true; }
-                else if (m_player && !m_player->IsMoving()) m_currentPhase = Phase::P1_Action;
+                if (m_aiWaitTimer > 0) m_aiWaitTimer--; // ★ AIの思考ウェイト！
+                else {
+                    if (!m_playerAIStarted) { ExecuteAI(m_player.get(), m_enemy.get(), true); m_playerAIStarted = true; }
+                    else if (m_player && !m_player->IsMoving()) {
+                        m_currentPhase = Phase::P1_Action;
+                        m_aiWaitTimer = 30; // ★ 移動後も0.5秒ウェイトを入れる
+                    }
+                }
             }
             else HandleMoveInput(*m_player, Phase::P1_Action);
             break;
 
         case Phase::P1_Action:
-            if (m_is1P_NPC) ExecuteAIAction(m_player.get(), m_enemy.get(), true);
+            if (m_is1P_NPC) {
+                if (m_aiWaitTimer > 0) m_aiWaitTimer--; // ★ AIの思考ウェイト！
+                else ExecuteAIAction(m_player.get(), m_enemy.get(), true);
+            }
             else HandleActionInput(*m_player, *m_enemy);
             break;
 
         case Phase::P2_Move:
-            if (m_enemy) {
-                ReserveOperatorUpkeepIfNeeded(*m_enemy, false);
-            }
+            if (m_enemy) ReserveOperatorUpkeepIfNeeded(*m_enemy, false);
 
             if (m_is2P_NPC) {
-                if (!m_enemyAIStarted) { ExecuteAI(m_enemy.get(), m_player.get(), false); m_enemyAIStarted = true; }
-                else if (m_enemy && !m_enemy->IsMoving()) m_currentPhase = Phase::P2_Action;
+                if (m_aiWaitTimer > 0) m_aiWaitTimer--; // ★ AIの思考ウェイト！
+                else {
+                    if (!m_enemyAIStarted) { ExecuteAI(m_enemy.get(), m_player.get(), false); m_enemyAIStarted = true; }
+                    else if (m_enemy && !m_enemy->IsMoving()) {
+                        m_currentPhase = Phase::P2_Action;
+                        m_aiWaitTimer = 30; // ★ 移動後も0.5秒ウェイトを入れる
+                    }
+                }
             }
             else HandleMoveInput(*m_enemy, Phase::P2_Action);
             break;
 
         case Phase::P2_Action:
-            if (m_is2P_NPC) ExecuteAIAction(m_enemy.get(), m_player.get(), false);
+            if (m_is2P_NPC) {
+                if (m_aiWaitTimer > 0) m_aiWaitTimer--; // ★ AIの思考ウェイト！
+                else ExecuteAIAction(m_enemy.get(), m_player.get(), false);
+            }
             else HandleActionInput(*m_enemy, *m_player);
             break;
         }
@@ -680,7 +720,19 @@ namespace App {
             }
         }
 
-        if (IsGameOver() && m_currentPhase != Phase::FINISH) {
+        // ==========================================
+        // ★ 修正: アニメーション完了を待ってからゲームオーバー演出へ
+        // ==========================================
+        bool isDisplayCaughtUp = true;
+        if (m_ruleMode == RuleMode::ZERO_ONE) {
+            float target1P = (float)(m_p1ZeroOneScore.n / m_p1ZeroOneScore.d);
+            float target2P = (float)(m_p2ZeroOneScore.n / m_p2ZeroOneScore.d);
+            // 表示上のスコアが完全に追いついているか判定
+            isDisplayCaughtUp = (m_p1DisplayScore == target1P) && (m_p2DisplayScore == target2P);
+        }
+
+        // 内部で終了条件を満たし、かつ画面のアニメーションが完了していればゲームオーバー！
+        if (IsGameOver() && isDisplayCaughtUp && m_currentPhase != Phase::FINISH) {
             m_currentPhase = Phase::FINISH;
             m_finishTimer = 0;
             m_effectIntensity = 1.0f;
