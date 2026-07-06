@@ -395,7 +395,15 @@ namespace App {
                 HandleMenuInput(m_modeCursor, 2);
                 if (bTrg || isBackBtnClicked) {
                     ProceduralAudio::GetInstance().PlayErrorSE();
-                    m_setupStep = SetupStep::SELECT_PLAYERS;
+                    // ★通信対戦時に戻る場合は、オフライン人数選択ではなく通信待機から抜ける
+                    if (NetworkManager::GetInstance()->GetState() == NetworkManager::State::CONNECTED) {
+                        NetworkManager::GetInstance()->Disconnect();
+                        m_titleState = TitleState::NETWORK_SETUP;
+                        m_netStep = NetSetupStep::SELECT_ROLE;
+                    }
+                    else {
+                        m_setupStep = SetupStep::SELECT_PLAYERS;
+                    }
                 }
                 else if (spaceTrg) {
                     ProceduralAudio::GetInstance().PlayPowerSE(9);
@@ -411,7 +419,15 @@ namespace App {
                 }
                 else if (spaceTrg) {
                     ProceduralAudio::GetInstance().PlayPowerSE(9);
-                    m_setupStep = SetupStep::SELECT_P1_TYPE;
+                    // ★通信対戦ならNPC選択をスキップしてステージ選択へ！
+                    if (NetworkManager::GetInstance()->GetState() == NetworkManager::State::CONNECTED) {
+                        m_players[0].typeCursor = 0;
+                        m_players[1].typeCursor = 0;
+                        m_setupStep = SetupStep::SELECT_STAGE;
+                    }
+                    else {
+                        m_setupStep = SetupStep::SELECT_P1_TYPE;
+                    }
                 }
                 break;
 
@@ -423,7 +439,15 @@ namespace App {
                 }
                 else if (spaceTrg) {
                     ProceduralAudio::GetInstance().PlayPowerSE(9);
-                    m_setupStep = SetupStep::SELECT_P1_TYPE;
+                    // ★通信対戦ならNPC選択をスキップしてステージ選択へ！
+                    if (NetworkManager::GetInstance()->GetState() == NetworkManager::State::CONNECTED) {
+                        m_players[0].typeCursor = 0;
+                        m_players[1].typeCursor = 0;
+                        m_setupStep = SetupStep::SELECT_STAGE;
+                    }
+                    else {
+                        m_setupStep = SetupStep::SELECT_P1_TYPE;
+                    }
                 }
                 break;
 
@@ -455,7 +479,13 @@ namespace App {
                 HandleMenuInput(m_stageCursor, 3);
                 if (bTrg || isBackBtnClicked) {
                     ProceduralAudio::GetInstance().PlayErrorSE();
-                    m_setupStep = SetupStep::SELECT_P2_TYPE;
+                    // ★通信対戦時に戻る場合はNPC選択を飛ばしてルール設定に戻る
+                    if (NetworkManager::GetInstance()->GetState() == NetworkManager::State::CONNECTED) {
+                        m_setupStep = (m_modeCursor == 0) ? SetupStep::SELECT_CLASSIC_STOCKS : SetupStep::SELECT_SCORE;
+                    }
+                    else {
+                        m_setupStep = SetupStep::SELECT_P2_TYPE;
+                    }
                 }
                 else if (spaceTrg) {
                     ProceduralAudio::GetInstance().PlayPowerSE(9);
