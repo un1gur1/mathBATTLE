@@ -1,99 +1,123 @@
+#define NOMINMAX
 #include "AccumulationCalc.h"
+#include <cmath>
+#include <string>
+#include <algorithm> 
 
 AccumulationCalc::AccumulationCalc() {
-    // ★ 実際の描画画面サイズを取得して、確実にド真ん中を計算する！
     int sw, sh;
     GetDrawScreenSize(&sw, &sh);
     m_centerX = sw / 2;
-    m_centerY = sh / 2;
+    m_centerY = sh / 2 + 60;
     m_prevMouse = 0;
+    m_clearCount = 0;
+
+    SRand(GetNowCount());
 
     InitFonts();
     InitButtons();
-    Clear();
+    NextStage(false);
 }
 
 AccumulationCalc::~AccumulationCalc() {
-    // 使い終わったらフォントメモリを解放（メモリリーク防止）
     DeleteFontToHandle(m_fontBtn);
     DeleteFontToHandle(m_fontDisp);
     DeleteFontToHandle(m_fontTotal);
 }
 
 void AccumulationCalc::InitFonts() {
-    // ★ めちゃくちゃ綺麗なアンチエイリアスフォントを生成
     m_fontBtn = CreateFontToHandle("BIZ UDゴシック", 50, 2, DX_FONTTYPE_ANTIALIASING);
     m_fontDisp = CreateFontToHandle("BIZ UDゴシック", 64, 3, DX_FONTTYPE_ANTIALIASING);
-    m_fontTotal = CreateFontToHandle("BIZ UDゴシック", 42, 2, DX_FONTTYPE_ANTIALIASING);
+    m_fontTotal = CreateFontToHandle("BIZ UDゴシック", 38, 2, DX_FONTTYPE_ANTIALIASING);
 }
 
 void AccumulationCalc::InitButtons() {
-    // ★ パネルサイズを大幅アップ（幅540, 高さ720）
-    int pX = m_centerX - 270;
-    int pY = m_centerY - 360;
+    int panelW = 680;
+    int panelH = 540;
+    int pX = m_centerX - panelW / 2;
+    int pY = m_centerY - panelH / 2;
 
-    // テンキーの配置設定 (ボタンサイズ95, 余白を含めたステップ120)
-    int startX = pX + 35;
-    int startY = pY + 230;
-    int step = 120;
-    int btnSize = 95;
+    int startX = pX + 50;
+    int startY = pY + 230; // ボタン位置を少し下げてディスプレイを広げました
+    int stepX = 120;
+    int stepY = 100;
+    int btnW = 100;
+    int btnH = 80;
 
     struct BtnData { int r, c; const char* lbl; int t, v; };
     BtnData data[15] = {
-        {0,0,"7",0,7}, {0,1,"8",0,8}, {0,2,"9",0,9}, {0,3,"+",1,'+'},
-        {1,0,"4",0,4}, {1,1,"5",0,5}, {1,2,"6",0,6}, {1,3,"-",1,'-'},
-        {2,0,"1",0,1}, {2,1,"2",0,2}, {2,2,"3",0,3}, {2,3,"*",1,'*'},
-        {3,0,"C",3,0}, {3,1,"=",2,0},                {3,3,"/",1,'/'}
+        {0,0,"7",0,7}, {0,1,"8",0,8}, {0,2,"9",0,9}, {0,3,"+",1,'+'}, {0,4,"-",1,'-'},
+        {1,0,"4",0,4}, {1,1,"5",0,5}, {1,2,"6",0,6}, {1,3,"*",1,'*'}, {1,4,"/",1,'/'},
+        {2,0,"1",0,1}, {2,1,"2",0,2}, {2,2,"3",0,3}, {2,3,"C",3,0},   {2,4,"=",2,0}
     };
 
     for (int i = 0; i < 15; ++i) {
-        m_buttons[i].x = startX + data[i].c * step;
-        m_buttons[i].y = startY + data[i].r * step;
-        m_buttons[i].w = (data[i].t == 2) ? (step * 2 - (step - btnSize)) : btnSize; // [=]ボタンは横長
-        m_buttons[i].h = btnSize;
+        m_buttons[i].x = startX + data[i].c * stepX;
+        m_buttons[i].y = startY + data[i].r * stepY;
+        m_buttons[i].w = btnW;
+        m_buttons[i].h = btnH;
         strcpy_s(m_buttons[i].label, data[i].lbl);
         m_buttons[i].type = data[i].t;
         m_buttons[i].val = data[i].v;
     }
 }
 
-void AccumulationCalc::Clear() {
-    m_num1 = 0; m_num2 = 0;
-    m_op = ' ';
-    m_inputPhase = 0;
-    m_latestResult = 0;
+void AccumulationCalc::NextStage(bool isClear) {
+    if (isClear) m_clearCount++;
+    else m_clearCount = 0;
+
+    Reset();
+
+    int primeTargets[] = { 43, 53, 71, 89, 103, 137, 149, 199, 223, 277, 311, 353, 401, 449, 499 };
+    int minIdx = std::min(m_clearCount, 5);
+    int maxIdx = std::min(minIdx + 5, 14);
+
+    int idx = minIdx + GetRand(maxIdx - minIdx);
+    m_targetScore = primeTargets[idx];
+}
+
+void AccumulationCalc::Reset() {
     m_runningTotal = 0;
-    m_hasResult = false;
+    m_num1 = 0;
+    m_num2 = 0;
+    m_op = '\0';
+    m_inputPhase = 0;
+    m_isCleared = false;
 }
 
 void AccumulationCalc::PushNumber(int n) {
     if (n <= 0 || n > 9) return;
-    if (m_inputPhase == 0) m_num1 = m_num1 * 10 + n;
-    else m_num2 = m_num2 * 10 + n;
+    if (m_inputPhase == 0) m_num1 = n;
+    else m_num2 = n;
 }
 
 void AccumulationCalc::PushOperator(char op) {
-    if (m_inputPhase == 0) {
+    if (m_num1 != 0) {
         m_op = op;
         m_inputPhase = 1;
     }
 }
 
 void AccumulationCalc::PushEqual() {
-    if (m_inputPhase == 1) {
+    if (m_inputPhase == 1 && m_num2 != 0) {
         int res = 0;
         switch (m_op) {
         case '+': res = m_num1 + m_num2; break;
         case '-': res = m_num1 - m_num2; break;
         case '*': res = m_num1 * m_num2; break;
-        case '/': if (m_num2 != 0) res = m_num1 / m_num2; break;
+        case '/': if (m_num2 != 0) res = m_num1 / m_num2; break; // 0除算防止
         }
-        m_latestResult = res;
-        m_runningTotal += res;
-        m_hasResult = true;
+        m_runningTotal += res; // 結果をTOTALに合算！(マイナスなら引き算になる)
 
-        m_num1 = 0; m_num2 = 0;
-        m_op = ' '; m_inputPhase = 0;
+        // 計算が終わったら数式をリセット
+        m_num1 = 0;
+        m_num2 = 0;
+        m_op = '\0';
+        m_inputPhase = 0;
+
+        if (m_runningTotal == m_targetScore) {
+            m_isCleared = true;
+        }
     }
 }
 
@@ -103,6 +127,11 @@ void AccumulationCalc::Update() {
     m_prevMouse = mouse;
 
     if (isClick) {
+        if (m_isCleared) {
+            NextStage(true);
+            return;
+        }
+
         int mx, my;
         GetMousePoint(&mx, &my);
 
@@ -114,7 +143,7 @@ void AccumulationCalc::Update() {
                 case 0: PushNumber(m_buttons[i].val); break;
                 case 1: PushOperator((char)m_buttons[i].val); break;
                 case 2: PushEqual(); break;
-                case 3: Clear(); break;
+                case 3: NextStage(false); break; // [C]でギブアップ＆リセット
                 }
                 break;
             }
@@ -123,41 +152,110 @@ void AccumulationCalc::Update() {
 }
 
 void AccumulationCalc::Draw() {
-    int colBg = GetColor(20, 22, 28);
-    int colPanel = GetColor(30, 32, 40);
-    int colYamabuki = GetColor(255, 177, 27);
-    int colText = GetColor(245, 245, 250);
-    int colDim = GetColor(150, 150, 160);
+    int colBg = GetColor(10, 12, 18);
+    int colPanel = GetColor(18, 20, 28);
+    int colCyber = GetColor(0, 150, 255);
+    int colAccent = GetColor(255, 140, 0);
+    int colText = GetColor(255, 255, 255);   // ★修正：数式をハッキリ見せるための純白
+    int colDim = GetColor(120, 140, 170);
+    int colSafe = GetColor(100, 255, 150);
+    int colDanger = GetColor(255, 100, 100);
 
-    int panelW = 540;
-    int panelH = 720;
+    int panelW = 680;
+    int panelH = 540;
     int pX = m_centerX - panelW / 2;
     int pY = m_centerY - panelH / 2;
 
-    // 1. 全体の背景（少しだけ透かすとサイバー感が出ます）
     SetDrawBlendMode(DX_BLENDMODE_ALPHA, 245);
-    DrawRoundRect(pX, pY, pX + panelW, pY + panelH, 25, 25, colBg, TRUE);
+    DrawRoundRect(pX, pY, pX + panelW, pY + panelH, 20, 20, colBg, TRUE);
     SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
-    DrawRoundRect(pX, pY, pX + panelW, pY + panelH, 25, 25, colYamabuki, FALSE);
+    DrawRoundRect(pX, pY, pX + panelW, pY + panelH, 20, 20, colCyber, FALSE);
 
-    // 2. ディスプレイ領域
-    DrawRoundRect(pX + 30, pY + 30, pX + panelW - 30, pY + 190, 15, 15, colPanel, TRUE);
+    // ★修正：ディスプレイ領域の縦幅を少し広げて、3段構成を見やすくしました
+    DrawRoundRect(pX + 25, pY + 25, pX + panelW - 25, pY + 215, 15, 15, colPanel, TRUE);
+    DrawRoundRect(pX + 25, pY + 25, pX + panelW - 25, pY + 215, 15, 15, GetColor(30, 50, 80), FALSE);
 
-    // 入力中の数式をアンチエイリアスフォントで描画
-    if (m_inputPhase == 0) {
-        if (m_num1 > 0) DrawFormatStringToHandle(pX + 50, pY + 50, colText, m_fontDisp, "%d", m_num1);
+    // ----------------------------------------------------
+    // 上段：TARGET と SCORE
+    // ----------------------------------------------------
+    DrawFormatStringToHandle(pX + 40, pY + 35, colCyber, m_fontTotal, "TARGET: %d", m_targetScore);
+    DrawFormatStringToHandle(pX + panelW - 210, pY + 35, colAccent, m_fontTotal, "SCORE: %d", m_clearCount);
+
+    if (m_isCleared) {
+        DrawFormatStringToHandle(pX + 220, pY + 90, colSafe, m_fontDisp, "CLEAR!!");
+
+        int blinkAlpha = (int)(150 + 100 * std::sin(GetNowCount() / 150.0));
+        SetDrawBlendMode(DX_BLENDMODE_ALPHA, blinkAlpha);
+        DrawStringToHandle(pX + 170, pY + 160, ">> Click to Next <<", colCyber, m_fontTotal);
+        SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
     }
     else {
-        DrawFormatStringToHandle(pX + 50, pY + 50, colText, m_fontDisp, "%d %c %d", m_num1, m_op, m_num2 > 0 ? m_num2 : 0);
+        // ----------------------------------------------------
+        // 中段：数式 と 計算結果のプレビュー
+        // ----------------------------------------------------
+        int midY = pY + 85;
+        std::string eqStr = ">> ";
+
+        if (m_num1 == 0) eqStr += "?";
+        else eqStr += std::to_string(m_num1);
+
+        if (m_op != '\0') {
+            eqStr += " ";
+            eqStr += m_op;
+            eqStr += " ";
+
+            if (m_num2 == 0) eqStr += "?";
+            else eqStr += std::to_string(m_num2);
+
+            // num2まで入力されたら、その横に「= 結果」をリアルタイム表示！
+            if (m_num2 != 0) {
+                int tempRes = 0;
+                switch (m_op) {
+                case '+': tempRes = m_num1 + m_num2; break;
+                case '-': tempRes = m_num1 - m_num2; break;
+                case '*': tempRes = m_num1 * m_num2; break;
+                case '/': tempRes = (m_num2 != 0) ? m_num1 / m_num2 : 0; break;
+                }
+                eqStr += " = ";
+                eqStr += std::to_string(tempRes);
+            }
+        }
+
+        // ★修正：薄色ではなく、ハッキリとした色（colText）で大きく描画
+        DrawStringToHandle(pX + 40, midY, eqStr.c_str(), colText, m_fontDisp);
+
+        // ----------------------------------------------------
+        // 下段：TOTAL と 差分
+        // ----------------------------------------------------
+        int btmY = pY + 160;
+        int diff = m_targetScore - m_runningTotal;
+        unsigned int diffCol = colDim;
+
+        if (diff < 0) {
+            diffCol = colDanger;
+        }
+        else if (diff <= 10) {
+            diffCol = colAccent;
+        }
+
+        // TOTALを左側に描画
+        DrawFormatStringToHandle(pX + 45, btmY, colText, m_fontTotal, "TOTAL: %d", m_runningTotal);
+
+        // 差分を右側に描画
+        if (diff > 0) {
+            DrawFormatStringToHandle(pX + 350, btmY, diffCol, m_fontTotal, "(あと: %d)", diff);
+        }
+        else if (diff < 0) {
+            DrawFormatStringToHandle(pX + 350, btmY, diffCol, m_fontTotal, "(ｵｰﾊﾞｰ: %d)", -diff);
+        }
+        else {
+            DrawFormatStringToHandle(pX + 350, btmY, colSafe, m_fontTotal, "(JUST !!)");
+        }
     }
 
-    // 右下にストックされた結果を描画
-    if (m_hasResult) {
-        DrawFormatStringToHandle(pX + 340, pY + 40, colDim, m_fontTotal, "+) %d", m_latestResult);
-        DrawFormatStringToHandle(pX + 260, pY + 110, colYamabuki, m_fontTotal, "TOTAL: %d", m_runningTotal);
-    }
-
-    // 3. ボタンの描画
+    // ----------------------------------------------------
+    // ボタンの描画
+    // ----------------------------------------------------
     int mx, my;
     GetMousePoint(&mx, &my);
 
@@ -167,20 +265,20 @@ void AccumulationCalc::Draw() {
         int bw = m_buttons[i].w;
         int bh = m_buttons[i].h;
 
-        bool isHover = (mx >= bx && mx <= bx + bw && my >= by && my <= by + bh);
+        bool isHover = !m_isCleared && (mx >= bx && mx <= bx + bw && my >= by && my <= by + bh);
+        unsigned int drawCol = m_isCleared ? colDim : colCyber;
 
-        // 文字の横幅を取得して、ボタンのド真ん中に文字が来るように計算
         int textW = GetDrawStringWidthToHandle(m_buttons[i].label, (int)strlen(m_buttons[i].label), m_fontBtn);
         int textX = bx + (bw - textW) / 2;
-        int textY = by + (bh - 50) / 2; // フォントサイズ50に基づくY座標補正
+        int textY = by + (bh - 50) / 2;
 
         if (isHover) {
-            DrawRoundRect(bx, by, bx + bw, by + bh, 15, 15, colYamabuki, TRUE);
+            DrawRoundRect(bx, by, bx + bw, by + bh, 15, 15, drawCol, TRUE);
             DrawStringToHandle(textX, textY, m_buttons[i].label, colBg, m_fontBtn);
         }
         else {
-            DrawRoundRect(bx, by, bx + bw, by + bh, 15, 15, colYamabuki, FALSE);
-            DrawStringToHandle(textX, textY, m_buttons[i].label, colText, m_fontBtn);
+            DrawRoundRect(bx, by, bx + bw, by + bh, 15, 15, drawCol, FALSE);
+            DrawStringToHandle(textX, textY, m_buttons[i].label, m_isCleared ? colDim : colText, m_fontBtn);
         }
     }
 }

@@ -3,19 +3,21 @@
 
 class AccumulationCalc {
 private:
-    int m_num1;
-    int m_num2;
-    char m_op;
-    int m_inputPhase;
-    int m_latestResult;
-    int m_runningTotal;
-    bool m_hasResult;
+    int m_num1;          // 入力する1つめの数字
+    int m_num2;          // 入力する2つめの数字
+    char m_op;           // 演算子
+    int m_inputPhase;    // 0:num1入力待ち, 1:num2入力待ち
+
+    int m_runningTotal;  // 現在のトータルスコア
+    int m_targetScore;   // 目標スコア
+
+    bool m_isCleared;    // クリアフラグ
+    int m_clearCount;    // 連勝数（スコア）
 
     int m_centerX;
     int m_centerY;
     int m_prevMouse;
 
-    // ★追加：綺麗なアンチエイリアスフォント用のハンドル
     int m_fontBtn;
     int m_fontDisp;
     int m_fontTotal;
@@ -32,9 +34,10 @@ private:
     void InitFonts();
 
 public:
-    AccumulationCalc(); // 引数なしで自動的に画面中央を取得するように変更
-    ~AccumulationCalc(); // ★追加：使い終わったらフォントを削除する
-    void Clear();
+    AccumulationCalc();
+    ~AccumulationCalc();
+    void NextStage(bool isClear);
+    void Reset();
     void PushNumber(int n);
     void PushOperator(char op);
     void PushEqual();

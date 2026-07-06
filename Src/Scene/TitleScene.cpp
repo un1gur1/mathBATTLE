@@ -6,7 +6,7 @@
 #include "SceneManager.h"
 #include "../Input/InputManager.h" 
 #include "../Manager/ProceduralAudio.h"
-#include "../Manager/NetworkManager.h" // ★通信マネージャーをインクルード
+#include "../Manager/NetworkManager.h" 
 #include "../../CyberGrid.h"
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -42,17 +42,27 @@ namespace {
     inline unsigned int COL_P1() { return GetColor(255, 140, 0); }
     inline unsigned int COL_P2() { return GetColor(0, 150, 255); }
     inline unsigned int COL_TEXT_ON() { return GetColor(255, 180, 0); }
-	inline unsigned int COL_TEXT_SUB() { return GetColor(200, 200, 200); }
-	inline unsigned int COL_TEXT_DIM() { return GetColor(100, 100, 100); }
-	inline unsigned int COL_TEXT_INFO() { return GetColor(200, 100, 255); }
-	inline unsigned int COL_TEXT_WARN() { return GetColor(255, 255, 0); }
-	inline unsigned int COL_TEXT_ERROR() { return GetColor(255, 100, 100); }
+    inline unsigned int COL_TEXT_SUB() { return GetColor(200, 200, 200); }
+    inline unsigned int COL_TEXT_DIM() { return GetColor(100, 100, 100); }
+    inline unsigned int COL_TEXT_INFO() { return GetColor(200, 100, 255); }
+    inline unsigned int COL_TEXT_WARN() { return GetColor(255, 255, 0); }
+    inline unsigned int COL_TEXT_ERROR() { return GetColor(255, 100, 100); }
     inline unsigned int COL_TEXT_OFF() { return GetColor(50, 100, 150); }
     inline unsigned int COL_WHITE() { return GetColor(255, 255, 255); }
     inline unsigned int COL_BLACK() { return GetColor(0, 0, 0); }
     inline unsigned int COL_TITLE_MAIN() { return GetColor(220, 245, 255); }
     inline unsigned int COL_TITLE_SUB() { return GetColor(0, 120, 255); }
     inline unsigned int COL_DANGER() { return GetColor(255, 100, 100); }
+
+    // ==========================================
+    // ★追加：マウスクリック時の波紋エフェクト管理
+    // ==========================================
+    struct RippleEffect {
+        float x, y;
+        float radius;
+        float alpha;
+    };
+    std::vector<RippleEffect> g_ripples;
 }
 
 namespace App {
@@ -111,8 +121,11 @@ namespace App {
         m_psHandle = LoadPixelShaderFromMem(g_ps_CyberGrid, sizeof(g_ps_CyberGrid));
         m_cbHandle = CreateShaderConstantBuffer(sizeof(float) * 4);
         m_shaderTime = 0.0f;
-        m_miniGame.Clear();
-        // ★ 通信マネージャーの初期化保証
+
+        m_miniGame.NextStage(false);
+
+        g_ripples.clear(); 
+
         if (NetworkManager::GetInstance() == nullptr) {
             NetworkManager::CreateInstance();
         }
@@ -126,7 +139,6 @@ namespace App {
         auto& input = InputManager::GetInstance();
         ProceduralAudio::GetInstance().Update();
 
-        // ★ 通信状態の更新（これを毎フレーム呼ばないとパケットが送受信されません！）
         if (NetworkManager::GetInstance() != nullptr) {
             NetworkManager::GetInstance()->Update();
         }
@@ -155,6 +167,22 @@ namespace App {
         static Vector2 prevM = m;
         bool mouseMoved = (m.x != prevM.x || m.y != prevM.y);
         prevM = m;
+
+        // ==========================================
+        // ★追加：波紋エフェクトの更新処理
+        // ==========================================
+        if (mClick) {
+            // クリックした瞬間に新しい波紋を発生させる
+            g_ripples.push_back({ m.x, m.y, 0.0f, 200.0f });
+        }
+        for (auto& r : g_ripples) {
+            r.radius += 12.0f; // 広がるスピード
+            r.alpha -= 6.0f;   // 消えるスピード
+        }
+        // 完全に透明になった波紋を削除
+        g_ripples.erase(std::remove_if(g_ripples.begin(), g_ripples.end(), [](const RippleEffect& r) { return r.alpha <= 0; }), g_ripples.end());
+        // ==========================================
+
 
         auto HoverBox = [&](int x, int y, int w, int h) {
             return (m.x >= x && m.x <= x + w && m.y >= y && m.y <= y + h);
@@ -187,11 +215,7 @@ namespace App {
             if (downTrg) { cursor++; if (cursor >= maxItems) cursor = 0; ProceduralAudio::GetInstance().PlayPowerSE(2); }
             };
 
-        // ==========================================
-        // ステート管理 (Top Level)
-        // ==========================================
         switch (m_titleState) {
-
         case TitleState::PRESS_START:
             if (spaceTrg || mClick) {
                 ProceduralAudio::GetInstance().PlayPowerSE(9);
@@ -201,7 +225,7 @@ namespace App {
             break;
 
         case TitleState::MAIN_MENU:
-            HandleMenuInput(m_mainMenuCursor, 5); // ★ 5項目に変更
+            HandleMenuInput(m_mainMenuCursor, 5);
 
             if (bTrg || isBackBtnClicked) {
                 ProceduralAudio::GetInstance().PlayErrorSE();
@@ -213,7 +237,7 @@ namespace App {
                     m_titleState = TitleState::BATTLE_SETUP;
                     m_setupStep = SetupStep::SELECT_PLAYERS;
                 }
-                else if (m_mainMenuCursor == 1) { // ★ 通信対戦を選択
+                else if (m_mainMenuCursor == 1) {
                     m_titleState = TitleState::NETWORK_SETUP;
                     m_netStep = NetSetupStep::SELECT_ROLE;
                     m_netRoleCursor = 0;
@@ -230,9 +254,6 @@ namespace App {
             }
             break;
 
-            // ==========================================
-            // ★ 新規: 通信マッチングの処理
-            // ==========================================
         case TitleState::NETWORK_SETUP:
             switch (m_netStep) {
             case NetSetupStep::SELECT_ROLE:
@@ -244,13 +265,11 @@ namespace App {
                 else if (spaceTrg) {
                     ProceduralAudio::GetInstance().PlayPowerSE(9);
                     if (m_netRoleCursor == 0) {
-                        // ホストとして待機開始（名前はランダム生成。のちにUIで入力可能に拡張できます）
                         std::string myName = "Player_" + std::to_string(GetNowCount() % 10000);
                         NetworkManager::GetInstance()->StartHost(myName);
                         m_netStep = NetSetupStep::HOST_WAITING;
                     }
                     else {
-                        // クライアントとして検索開始
                         NetworkManager::GetInstance()->StartSearch();
                         m_netStep = NetSetupStep::CLIENT_SEARCHING;
                         m_hostListCursor = 0;
@@ -259,22 +278,20 @@ namespace App {
                 break;
 
             case NetSetupStep::HOST_WAITING:
+             
+
                 if (bTrg || isBackBtnClicked) {
                     ProceduralAudio::GetInstance().PlayErrorSE();
                     NetworkManager::GetInstance()->Disconnect();
                     m_netStep = NetSetupStep::SELECT_ROLE;
                 }
-                // ★ 修正：ホストのマッチング成功時
+
                 if (NetworkManager::GetInstance()->GetState() == NetworkManager::State::CONNECTED) {
                     ProceduralAudio::GetInstance().PlayPowerSE(9);
-
-                    // ホストはゲーム設定画面へ！(プレイヤー人数選択は飛ばしてモード選択へ)
                     m_titleState = TitleState::BATTLE_SETUP;
                     m_setupStep = SetupStep::SELECT_MODE;
-
-                    // オンラインなので強制的に対人戦設定
-                    m_players[0].typeCursor = 0; // 1Pはプレイヤー
-                    m_players[1].typeCursor = 0; // 2Pもプレイヤー(通信相手)
+                    m_players[0].typeCursor = 0;
+                    m_players[1].typeCursor = 0;
                 }
                 break;
             case NetSetupStep::CLIENT_SEARCHING:
@@ -291,51 +308,44 @@ namespace App {
                     m_netStep = NetSetupStep::SELECT_ROLE;
                 }
                 else if (spaceTrg && !hosts.empty()) {
-                    // 選択したホストに接続！
                     ProceduralAudio::GetInstance().PlayPowerSE(8);
                     NetworkManager::GetInstance()->ConnectToHost(hosts[m_hostListCursor].ip);
                 }
 
-              if (NetworkManager::GetInstance()->GetState() == NetworkManager::State::CONNECTED) {
+                if (NetworkManager::GetInstance()->GetState() == NetworkManager::State::CONNECTED) {
                     ProceduralAudio::GetInstance().PlayPowerSE(9);
-                    // クライアントはホストの設定完了を待つステートへ！
-                    m_netStep = NetSetupStep::CLIENT_WAIT_SETUP; 
+                    m_netStep = NetSetupStep::CLIENT_WAIT_SETUP;
                 }
                 break;
             }
             break;
-        case NetSetupStep::CLIENT_WAIT_SETUP:
-        {
-            SetupPacket packet;
+            case NetSetupStep::CLIENT_WAIT_SETUP:
+            {
+                SetupPacket packet;
 
-            m_miniGame.Update();
+                m_miniGame.Update();
 
-            // パケットが届いたか監視する
-            if (NetworkManager::GetInstance()->ReceiveSetupPacket(packet)) {
-                ProceduralAudio::GetInstance().PlayPowerSE(9);
+                if (NetworkManager::GetInstance()->ReceiveSetupPacket(packet)) {
+                    ProceduralAudio::GetInstance().PlayPowerSE(9);
 
-                // 届いたデータを SceneManager にそっくりそのまま登録！
-                auto* sm = SceneManager::GetInstance();
+                    auto* sm = SceneManager::GetInstance();
 
-                // モードとスコア/残機の登録
-                if (packet.modeCursor == 0) {
-                    int maxStocks = (packet.stocksCursor == 0) ? 1 : (packet.stocksCursor == 1) ? 3 : 5;
-                    sm->SetGameSettings(2, packet.modeCursor, maxStocks); // 通信なので強制2P
+                    if (packet.modeCursor == 0) {
+                        int maxStocks = (packet.stocksCursor == 0) ? 1 : (packet.stocksCursor == 1) ? 3 : 5;
+                        sm->SetGameSettings(2, packet.modeCursor, maxStocks);
+                    }
+                    else {
+                        int finalScore = TARGET_SCORES[packet.scoreCursor];
+                        sm->SetGameSettings(2, packet.modeCursor, finalScore);
+                    }
+                    sm->SetPlayer1Settings(false, packet.p1StartNum, packet.p1StartX - 1, GRID_SIZE - packet.p1StartY);
+                    sm->SetPlayer2Settings(false, packet.p2StartNum, packet.p2StartX - 1, GRID_SIZE - packet.p2StartY);
+                    sm->SetStageIndex(packet.stageCursor);
+
+                    sm->ChangeScene(SceneManager::SCENE_ID::GAME);
                 }
-                else {
-                    int finalScore = TARGET_SCORES[packet.scoreCursor];
-                    sm->SetGameSettings(2, packet.modeCursor, finalScore);
-                }
-                // 座標と初期パワーの登録 (引数の数と型を確実に合わせる)
-                sm->SetPlayer1Settings(false, packet.p1StartNum, packet.p1StartX - 1, GRID_SIZE - packet.p1StartY);
-                sm->SetPlayer2Settings(false, packet.p2StartNum, packet.p2StartX - 1, GRID_SIZE - packet.p2StartY);
-                sm->SetStageIndex(packet.stageCursor);
-
-                // 準備完了！ゲーム画面へ遷移
-                sm->ChangeScene(SceneManager::SCENE_ID::GAME);
+                break;
             }
-            break;
-        }
             }
             break;
         case TitleState::OPTION_MENU:
@@ -366,7 +376,6 @@ namespace App {
             break;
 
         case TitleState::BATTLE_SETUP:
-            // ... (これ以降の BATTLE_SETUP 処理は変更なしのため省略せずにそのまま残します)
             switch (m_setupStep) {
             case SetupStep::SELECT_PLAYERS:
                 HandleMenuInput(m_playerCursor, 2);
@@ -532,7 +541,6 @@ namespace App {
                         else {
                             auto* sm = SceneManager::GetInstance();
 
-                            // ★ 修正：もしオンライン対戦のホストだったら、クライアントに設定データを送信する！
                             if (NetworkManager::GetInstance()->GetState() == NetworkManager::State::CONNECTED &&
                                 NetworkManager::GetInstance()->IsHost()) {
 
@@ -548,11 +556,9 @@ namespace App {
                                 packet.p2StartX = m_players[1].startX;
                                 packet.p2StartY = m_players[1].startY;
 
-                                // 送信！
                                 NetworkManager::GetInstance()->SendSetupPacket(packet);
                             }
 
-                            // いつも通りのSceneManagerへの登録処理
                             if (m_modeCursor == 0) {
                                 int maxStocks = (m_stocksCursor == 0) ? 1 : (m_stocksCursor == 1) ? 3 : 5;
                                 sm->SetGameSettings(m_playerCursor, m_modeCursor, maxStocks);
@@ -571,7 +577,7 @@ namespace App {
                 }
                 break;
             }
-               
+
             } // End switch(m_setupStep)
             break; // End BATTLE_SETUP
 
@@ -674,7 +680,7 @@ namespace App {
 
         auto drawBracket = [&](int x, int y, int w, int h, unsigned int col) {
             int d = 15;
-            DrawLine(x, y, x + d, y, col, 2);           DrawLine(x, y, x, y + d, col, 2);
+            DrawLine(x, y, x + d, y, col, 2);            DrawLine(x, y, x, y + d, col, 2);
             DrawLine(x + w - d, y, x + w, y, col, 2);   DrawLine(x + w, y, x + w, y + d, col, 2);
             DrawLine(x, y + h - d, x, y + h, col, 2);   DrawLine(x, y + h, x + d, y + h, col, 2);
             DrawLine(x + w - d, y + h, x + w, y + h, col, 2); DrawLine(x + w, y + h - d, x + w, y + h, col, 2);
@@ -708,9 +714,6 @@ namespace App {
             }
             };
 
-        // ==========================================
-        // UIの描画分岐
-        // ==========================================
         switch (m_titleState) {
 
         case TitleState::PRESS_START: {
@@ -723,16 +726,12 @@ namespace App {
         }
 
         case TitleState::MAIN_MENU:
-            // ★ メニューを5項目に変更
             drawMenuList(m_mainMenuCursor, "", { "オフラインバトル", "通信対戦", "チュートリアル", "オプション", "ゲーム終了" });
             break;
 
-            // ==========================================
-            // ★ 新規：通信マッチング画面の描画
-            // ==========================================
         case TitleState::NETWORK_SETUP:
             switch (m_netStep) {
-            case NetSetupStep::CLIENT_WAIT_SETUP: // ★追加
+            case NetSetupStep::CLIENT_WAIT_SETUP:
             {
                 const char* msg = "ホストがゲームルールを設定中です...";
                 int msgW = GetDrawStringWidthToHandle(msg, (int)strlen(msg), m_fontMenu);
@@ -748,10 +747,12 @@ namespace App {
             {
                 const char* msg = "対戦相手を待っています...";
                 int msgW = GetDrawStringWidthToHandle(msg, (int)strlen(msg), m_fontMenu);
+                // ★修正: 電卓が消えたので、文字のY座標のズレを戻しました
                 DrawStringToHandle(CX - msgW / 2, CY, msg, COL_TEXT_SUB(), m_fontMenu);
 
                 const char* subMsg = "(同じLAN内のPCから検索可能)";
                 int subW = GetDrawStringWidthToHandle(subMsg, (int)strlen(subMsg), m_fontSmall);
+                // ★修正: 同様にY座標を戻し、ここにあった m_miniGame.Draw(); を削除しました
                 DrawStringToHandle(CX - subW / 2, CY + 60, subMsg, COL_TEXT_SUB(), m_fontSmall);
                 break;
             }
@@ -764,7 +765,6 @@ namespace App {
                     DrawStringToHandle(CX - msgW / 2, CY, msg, COL_TEXT_SUB(), m_fontMenu);
                 }
                 else {
-                    // 見つかったホストを動的にリスト化
                     std::vector<std::string> hostStrs;
                     for (const auto& h : hosts) {
                         hostStrs.push_back("ホスト: " + h.playerName + " (" + h.ipString + ")");
@@ -786,7 +786,6 @@ namespace App {
             break;
 
         case TitleState::BATTLE_SETUP:
-            // ... (これ以降の BATTLE_SETUP 描画は変更なしのため省略せずにそのまま残します)
             switch (m_setupStep) {
             case SetupStep::SELECT_PLAYERS:
                 drawMenuList(m_playerCursor, "【 バトル方式 】", { "シングルバトル", "オフラインバトル" });
@@ -908,12 +907,12 @@ namespace App {
                     }
                 }
                 break;
-            } // End CUSTOM
-            } // End switch(m_setupStep)
+            }
+            }
             break;
-        } // End switch(m_titleState)
+        }
 
-        // 共通戻るボタン（タイトル待機とトップメニュー以外で描画）
+        // 共通戻るボタン
         if (m_titleState != TitleState::PRESS_START && m_titleState != TitleState::MAIN_MENU) {
             int backBtnX = CX - 150, backBtnY = sh - 150, backBtnW = 300, backBtnH = 60;
             bool isHover = HoverBox(backBtnX, backBtnY, backBtnW, backBtnH);
@@ -946,6 +945,19 @@ namespace App {
         const char* fullscreenGuide = "[F11] 全画面表示 / ウィンドウ切替";
         int fsGuideW = GetDrawStringWidthToHandle(fullscreenGuide, (int)strlen(fullscreenGuide), m_fontSmall);
         DrawStringToHandle(sw - fsGuideW - 20, sh - 55, fullscreenGuide, GetColor(150, 150, 180), m_fontSmall);
+
+
+        // ==========================================
+        // ★追加：マウスクリック波紋エフェクトの描画（一番最後に描画して一番手前に表示）
+        // ==========================================
+        SetDrawBlendMode(DX_BLENDMODE_ADD, 255);
+        for (const auto& r : g_ripples) {
+            SetDrawBlendMode(DX_BLENDMODE_ADD, (int)r.alpha);
+            // COL_TEXT_ON (山吹色) で円を描画
+            DrawCircleAA(r.x, r.y, r.radius, 64, COL_TEXT_ON(), FALSE, 3.0f);
+        }
+        SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+        // ==========================================
     }
 
     void TitleScene::Release() {

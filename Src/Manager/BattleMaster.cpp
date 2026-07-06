@@ -206,8 +206,8 @@ namespace App {
         m_is1PWinner = false;
 
         m_currentPhase = Phase::P1_TurnStart;
-        m_turnStartTimer = 80; // 約1.3秒のカットイン演出
-        m_aiWaitTimer = 45;    // AIの初回思考時間
+        m_turnStartTimer = 30; // 約1.3秒のカットイン演出
+        m_aiWaitTimer = 40;    // AIの初回思考時間
         m_ui = std::make_unique<BattleUI>();
         m_ui->Init();
         int stageIdx = sm->GetStageIndex();
@@ -620,7 +620,13 @@ namespace App {
             m_ui->ScrollLog(wheel, mousePos.x, mousePos.y);
         }
 
-        m_shaderTime += 0.0016f + (0.01f * m_effectIntensity);
+        if (m_ui) {
+            int p1Num = m_player ? m_player->GetNumber() : 1;
+            int p2Num = m_enemy ? m_enemy->GetNumber() : 1;
+            m_ui->Update(m_effectIntensity, p1Num, p2Num);
+        }
+
+        m_shaderTime += 0.0016f + (0.005f * m_effectIntensity);
         if (m_effectIntensity > 0.0f) m_effectIntensity -= 0.05f;
 
         // ==========================================
