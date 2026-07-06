@@ -97,6 +97,7 @@
     <ClCompile Include="Src\Manager\TutorialMaster.cpp" />
     <ClCompile Include="Src\Manager\NetworkManager.cpp" />
     <ClCompile Include="Src\Manager\AccumulationCalc.cpp" />
+    <ClCompile Include="Src\Manager\FadeManager.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Src\Application.h">
@@ -154,6 +155,7 @@
     <ClInclude Include="Src\Manager\TutorialMaster.h" />
     <ClInclude Include="Src\Manager\NetworkManager.h" />
     <ClInclude Include="Src\Manager\AccumulationCalc.h" />
+    <ClInclude Include="Src\Manager\FadeManager.h" />
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="Src\PixelShader.hlsl">

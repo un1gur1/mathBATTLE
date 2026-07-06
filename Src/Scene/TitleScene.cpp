@@ -792,7 +792,7 @@ namespace App {
                 break;
             case SetupStep::SELECT_MODE: {
                 drawMenuList(m_modeCursor, "【 プレイモード 】", { "ノーマルバトル", "カウントバトル" });
-                const char* modeDesc = (m_modeCursor == 0) ? "相手のバッテリーを削り切れ！四則演算を用いた王道ダメージバトル" : "目標スコアへピタリと着地しろ！極限の頭脳戦モード";
+                const char* modeDesc = (m_modeCursor == 0) ? "相手のバッテリーを削り切れ！演算子バトルの真骨頂！上級者向け！" : "目標値へピタリと合わせろ！わかりやすくておすすめ！！";
                 int descW = GetDrawStringWidthToHandle(modeDesc, (int)strlen(modeDesc), m_fontSmall);
                 int descX = menuCX - descW / 2;
                 int descY = menuStartY + MENU_ITEM_BASE_Y + 2 * MENU_ITEM_STEP_Y + 40;

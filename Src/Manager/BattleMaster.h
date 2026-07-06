@@ -185,9 +185,9 @@ namespace App {
         float m_uiCursorX_2P = 0.0f;
 
         // ---------- êÌê— ----------
-        int m_totalMoves;
-        int m_totalOps;
-        int m_maxDamage;
+        int m_p1TotalMoves, m_p2TotalMoves;
+        int m_p1TotalOps, m_p2TotalOps;
+        int m_p1MaxDamage, m_p2MaxDamage;
         int m_startTime;
         std::vector<std::string> m_actionLog;
 

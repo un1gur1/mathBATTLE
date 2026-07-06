@@ -14,45 +14,40 @@ namespace App {
     // ==========================================
     SceneManager* SceneManager::instance_ = nullptr;
 
-    void SceneManager::SetGameEnd(bool isEnd)
-    {
-		isGameEnd_ = isEnd;
-
+    void SceneManager::SetGameEnd(bool isEnd) {
+        isGameEnd_ = isEnd;
     }
 
-    bool SceneManager::IsGameEnd() const
-    {
-
-		return isGameEnd_;
+    bool SceneManager::IsGameEnd() const {
+        return isGameEnd_;
     }
 
     // ==========================================
     // コンストラクタ: 各種変数の初期化
     // ==========================================
     SceneManager::SceneManager()
-        : scene_(nullptr)              // 現在のシーン
-        , load_(nullptr)               // ローディング画面（将来的な拡張用）
-        , fader_(nullptr)              // フェード演出（将来的な拡張用）
-        , sceneId_(SCENE_ID::NONE)     // 現在のシーンID
-        , nextSceneId_(SCENE_ID::NONE) // 次のシーンID
-        , isChanging_(false)           // シーン切り替え中フラグ
-        , isGameEnd_(false)            // ゲーム終了フラグ
-        , playerCount_(1)              // プレイヤー人数（1=1P vs CPU, 2=2P対戦）
-        , gameMode_(0)                 // ゲームモード（0=クラシック, 1=ゼロワン）
-        , zeroOneScore_(501)           // ゼロワンモードの目標スコア
-        , is1P_NPC_(false)             // 1PがCPUかどうか
-        , is2P_NPC_(true)              // 2PがCPUかどうか
-        , p1StartNum_(5)               // 1Pの初期数値
-        , p2StartNum_(7)               // 2Pの初期数値
-        , p1StartX_(1), p1StartY_(1)   // 1Pの初期座標
-        , p2StartX_(7), p2StartY_(7)   // 2Pの初期座標
-        , m_lastIsWin(false)           // 前回の戦闘結果（勝敗）
-        , m_lastStats({ 0, 0, 0, 0, 0 }) // 前回の戦闘統計
-        , isPaused_(false)             // ポーズ中フラグ
-        , pauseMenu_(new PauseMenu())  // ポーズメニュー
+        : scene_(nullptr)
+        , load_(nullptr)
+        , sceneId_(SCENE_ID::NONE)
+        , nextSceneId_(SCENE_ID::NONE)
+        , isChanging_(false)
+        , isGameEnd_(false)
+        , playerCount_(1)
+        , gameMode_(0)
+        , zeroOneScore_(501)
+        , is1P_NPC_(false)
+        , is2P_NPC_(true)
+        , p1StartNum_(5)
+        , p2StartNum_(7)
+        , p1StartX_(1), p1StartY_(1)
+        , p2StartX_(7), p2StartY_(7)
+        , m_winnerPlayer(1)
+        , m_p1Stats({ 0, 0, 0, 0, 0 })
+        , m_p2Stats({ 0, 0, 0, 0, 0 })
+        , isPaused_(false)
+        , pauseMenu_(new PauseMenu())
     {
     }
-
     // ==========================================
     // デストラクタ: リソース解放
     // ==========================================
@@ -63,12 +58,7 @@ namespace App {
             scene_ = nullptr;
         }
         if (load_) {
-            // delete load_; // 適切な型にキャストして削除
             load_ = nullptr;
-        }
-        if (fader_) {
-            // delete fader_;
-            fader_ = nullptr;
         }
         if (pauseMenu_) {
             delete pauseMenu_;
@@ -86,33 +76,27 @@ namespace App {
         sceneId_ = SCENE_ID::NONE;
         nextSceneId_ = SCENE_ID::NONE;
 
-        // デフォルトのゲーム設定
-        playerCount_ = 1;          // 1人プレイ
-        gameMode_ = 0;             // クラシックモード
-        zeroOneScore_ = 501;       // ゼロワンの目標スコア
+        playerCount_ = 1;
+        gameMode_ = 0;
+        zeroOneScore_ = 501;
 
-        // プレイヤー設定
-        is1P_NPC_ = false;         // 1Pは人間
-        is2P_NPC_ = true;          // 2PはCPU
-        p1StartNum_ = 5;           // 初期値5（2マス移動）
-        p2StartNum_ = 7;           // 初期値7（全方向移動）
-        p1StartX_ = 1;             // 左上スタート
+        is1P_NPC_ = false;
+        is2P_NPC_ = true;
+        p1StartNum_ = 5;
+        p2StartNum_ = 7;
+        p1StartX_ = 1;
         p1StartY_ = 1;
-        p2StartX_ = 7;             // 右下スタート
+        p2StartX_ = 7;
         p2StartY_ = 7;
 
-        // タイトル画面へ
-        ChangeScene(SCENE_ID::TITLE);
+        // ★修正：起動時は一瞬でタイトル画面を作り、そこから「フェードイン（幕開け）」する！
+        nextSceneId_ = SCENE_ID::TITLE;
+        PerformSceneChange();
+        m_fade.StartFadeIn(0.015f); // 少しゆっくり開く
     }
 
-    // ==========================================
-    // 3D初期化: 現在は非使用（将来的な拡張用）
-    // ==========================================
     void SceneManager::Init3D() {}
 
-    // ==========================================
-    // どこからでも呼べるポーズ切り替えスイッチ
-    // ==========================================
     void SceneManager::TogglePause() {
         isPaused_ = !isPaused_;
         ProceduralAudio::GetInstance().PlayPowerSE(9); // ポーズ効果音
@@ -123,41 +107,37 @@ namespace App {
     // 更新処理: シーン切り替えとポーズ管理
     // ==========================================
     void SceneManager::Update() {
-        // シーン切り替え処理
-        if (isChanging_) PerformSceneChange();
+        // ★追加：フェード演出の更新
+        m_fade.Update();
 
-        // ==========================================
-        // ESCキーによるポーズトグル（キーボードのみここで検知）
-        // ==========================================
+        // ★追加：フェードアウト（画面が閉まりきった）が完了したら、裏でシーンを切り替える！
+        if (isChanging_ && m_fade.IsFadeOutDone()) {
+            PerformSceneChange();
+            m_fade.StartFadeIn(0.02f); // 切り替わったら幕を開ける
+        }
+
         static bool prevEsc = false;
         bool escHit = (CheckHitKey(KEY_INPUT_ESCAPE) == 1);
 
-        // ESCキーが押された瞬間だけスイッチを入れる
-        if (escHit && !prevEsc) {
+        // ★修正：フェード中（シーン切り替え中）はポーズできないようにロックをかける
+        if (escHit && !prevEsc && !isChanging_ && !m_fade.IsFading()) {
             TogglePause();
         }
         prevEsc = escHit;
 
-        // ==========================================
-        // 状態に応じた更新処理
-        // ==========================================
         if (isPaused_) {
-            // ポーズ中: メニュー操作のみ受け付ける
             if (pauseMenu_) {
                 auto result = pauseMenu_->Update();
 
                 if (result == PauseMenu::Result::RESUME) {
-                    // 再開: スイッチをもう一度押してポーズ解除
                     TogglePause();
                 }
                 else if (result == PauseMenu::Result::TITLE) {
-                    // タイトルへ戻る
                     isPaused_ = false;
                     ProceduralAudio::GetInstance().PlayPowerSE(9);
-                    ChangeScene(SCENE_ID::TITLE);
+                    ChangeScene(SCENE_ID::TITLE); // タイトルへ（フェードアウトが走る）
                 }
                 else if (result == PauseMenu::Result::EXIT) {
-                    // ゲーム終了
                     ProceduralAudio::GetInstance().PlayPowerSE(9);
                     isGameEnd_ = true;
                 }
@@ -180,11 +160,11 @@ namespace App {
         if (isPaused_ && pauseMenu_) {
             pauseMenu_->Draw();
         }
+
+        // 3. ★追加：一番手前にブラインドフェードを描画！
+        m_fade.Draw();
     }
 
-    // ==========================================
-    // 削除処理: 全リソースの解放
-    // ==========================================
     void SceneManager::Delete() {
         if (scene_) {
             scene_->Release();
@@ -197,59 +177,46 @@ namespace App {
     }
 
     // ==========================================
-    // シーン切り替え要求: 次フレームで実行
+    // シーン切り替え要求
     // ==========================================
     void SceneManager::ChangeScene(SCENE_ID nextId) {
+        // ★修正：すでにフェード中なら無視する（連打バグ防止）
+        if (isChanging_ || m_fade.IsFading()) return;
+
         nextSceneId_ = nextId;
         isChanging_ = true;
+        m_fade.StartFadeOut(0.02f); // ★追加：いきなり切り替えず、まずは画面を閉じる！
     }
 
     // ==========================================
     // シーン切り替え実行: 実際のシーンオブジェクト生成
     // ==========================================
     void SceneManager::PerformSceneChange() {
-        // 現在のシーンを破棄
         if (scene_) {
             scene_->Release();
             delete scene_;
             scene_ = nullptr;
         }
 
-        // 新しいシーンを生成
         switch (nextSceneId_) {
-        case SCENE_ID::NONE:
-            scene_ = nullptr;
-            break;
-        case SCENE_ID::TITLE:
-            scene_ = new TitleScene();
-            break;
-        case SCENE_ID::TUTORIAL:       
-            scene_ = new TutorialScene();
-            break;
-        case SCENE_ID::GAME:
-            scene_ = new GameScene();
-            break;
-        case SCENE_ID::RESULT:
-            scene_ = new ResultScene();
-            break;
-        default:
-            scene_ = nullptr;
-            break;
+        case SCENE_ID::NONE:     scene_ = nullptr; break;
+        case SCENE_ID::TITLE:    scene_ = new TitleScene(); break;
+        case SCENE_ID::TUTORIAL: scene_ = new TutorialScene(); break;
+        case SCENE_ID::GAME:     scene_ = new GameScene(); break;
+        case SCENE_ID::RESULT:   scene_ = new ResultScene(); break;
+        default:                 scene_ = nullptr; break;
         }
 
-        // シーンIDを更新
         sceneId_ = nextSceneId_;
         nextSceneId_ = SCENE_ID::NONE;
         isChanging_ = false;
 
-        // シーン切り替え時はポーズを強制解除
         isPaused_ = false;
 
-        // 新しいシーンの初期化
         if (scene_) {
-            scene_->Init();        // 基本設定
-            scene_->Load();        // リソース読み込み
-            scene_->LoadEnd();     // 読み込み完了処理
+            scene_->Init();
+            scene_->Load();
+            scene_->LoadEnd();
         }
     }
 

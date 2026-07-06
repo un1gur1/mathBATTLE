@@ -1,224 +1,376 @@
+ï»¿#define NOMINMAX
 #include "ResultScene.h"
 #include <DxLib.h>
 #include <cmath>
 #include <string>
+#include <algorithm>
 #include "../../CyberGrid.h"
+#include "../Manager/ProceduralAudio.h"
 
 namespace App {
 
-    // ==========================================
-    // ƒRƒ“ƒXƒgƒ‰ƒNƒ^: ƒŠƒUƒ‹ƒg‰æ–Ê‚Ì‰Šú’lİ’è
-    // ==========================================
     ResultScene::ResultScene()
-        : m_frameCount(0)          // ƒtƒŒ[ƒ€ƒJƒEƒ“ƒ^[
-        , m_psHandle(-1)           // ƒsƒNƒZƒ‹ƒVƒF[ƒ_[ƒnƒ“ƒhƒ‹
-        , m_cbHandle(-1)           // ’è”ƒoƒbƒtƒ@ƒnƒ“ƒhƒ‹
-        , m_isWin(false)           // Ÿ”sƒtƒ‰ƒO
-        , m_stats({ 0, 0, 0, 0, 0 })  // íÑƒf[ƒ^
+        : m_state(State::FADE_IN), m_frameCount(0), m_stateTimer(0)
+        , m_psHandle(-1), m_cbHandle(-1)
+        , m_fontTitle(-1), m_fontLabel(-1), m_fontNum(-1), m_fontRank(-1)
+        , m_winner(1), m_p1Stats({ 0 }), m_p2Stats({ 0 })
+        , m_p1FinalScore(0), m_p2FinalScore(0)
+        , m_rankScale(5.0f), m_bgOffset(0.0f)
+        , m_dispTime(0), m_dispTurns(0)
+        , m_dispP1Moves(0), m_dispP2Moves(0)
+        , m_dispP1Ops(0), m_dispP2Ops(0)
+        , m_dispP1Dmg(0), m_dispP2Dmg(0)
+        , m_dispP1Score(0), m_dispP2Score(0)
     {
     }
 
-    // ==========================================
-    // ƒfƒXƒgƒ‰ƒNƒ^: ƒŠƒ\[ƒX‰ğ•ú
-    // ==========================================
     ResultScene::~ResultScene() {
         Release();
     }
 
-    // ==========================================
-    // ‰Šú‰»: ƒoƒgƒ‹Œ‹‰Ê‚Ìæ“¾‚ÆƒVƒF[ƒ_[€”õ
-    // ==========================================
     void ResultScene::Init() {
+        m_state = State::FADE_IN;
         m_frameCount = 0;
+        m_stateTimer = 0;
+        m_rankScale = 5.0f;
+        m_bgOffset = 0.0f;
 
-        // SceneManager‚©‚çíÑƒf[ƒ^‚ğæ“¾
+        m_dispTime = m_dispTurns = 0.0f;
+        m_dispP1Moves = m_dispP2Moves = m_dispP1Ops = m_dispP2Ops = m_dispP1Dmg = m_dispP2Dmg = m_dispP1Score = m_dispP2Score = 0.0f;
+
         auto* sm = SceneManager::GetInstance();
-        m_isWin = sm->GetLastIsWin();      // Ÿ”sŒ‹‰Ê
-        m_stats = sm->GetLastStats();      // Ú×íÑ
+        m_winner = sm->GetWinnerPlayer();
+        m_p1Stats = sm->GetP1Stats();
+        m_p2Stats = sm->GetP2Stats();
 
-        // ”wŒiƒGƒtƒFƒNƒg—pƒVƒF[ƒ_[‚Ì“Ç‚İ‚İ
+        CalculateScoreAndRank();
+
+        m_fontTitle = CreateFontToHandle("BIZ UDæ˜æœ Medium", 100, 3, DX_FONTTYPE_ANTIALIASING);
+        m_fontLabel = CreateFontToHandle("BIZ UDã‚´ã‚·ãƒƒã‚¯", 28, 2, DX_FONTTYPE_ANTIALIASING);
+        m_fontNum = CreateFontToHandle("BIZ UDã‚´ã‚·ãƒƒã‚¯", 42, 3, DX_FONTTYPE_ANTIALIASING);
+        m_fontRank = CreateFontToHandle("HGPå‰µè‹±è§’ï¾ï¾Ÿï½¯ï¾Œï¾Ÿä½“", 200, 5, DX_FONTTYPE_ANTIALIASING);
+
         if (m_psHandle == -1) {
             m_psHandle = LoadPixelShaderFromMem(g_ps_CyberGrid, sizeof(g_ps_CyberGrid));
             m_cbHandle = CreateShaderConstantBuffer(sizeof(float) * 4);
         }
     }
 
-    // ==========================================
-    // ƒŠƒ\[ƒX“Ç‚İ‚İ: Œ»İ‚Í”ñg—p
-    // ==========================================
+    void ResultScene::CalculateScoreAndRank() {
+        // 1. ã¾ãšã¯ç´”ç²‹ãªãƒ—ãƒ¬ã‚¤å†…å®¹ï¼ˆåŸºç¤ç‚¹ï¼‰ã‚’è¨ˆç®—ã™ã‚‹
+        auto calcBasePerformance = [&](const BattleStats& stats) {
+            int timeBonus = std::max(0, 10000 - (stats.playTimeFrames / 1000) * 50);
+            int turnPenalty = stats.totalTurns * 200;
+            int damageBonus = stats.maxDamage * 500;
+            int opsBonus = stats.totalOpsUsed * 100; // æ¼”ç®—å­ã‚’å¤šãä½¿ã£ã¦å·¥å¤«ã—ãŸãƒœãƒ¼ãƒŠã‚¹
+
+            return std::max(0, timeBonus - turnPenalty + damageBonus + opsBonus);
+            };
+
+        int p1Base = calcBasePerformance(m_p1Stats);
+        int p2Base = calcBasePerformance(m_p2Stats);
+
+        // 2. å‹æ•—ã«å¿œã˜ãŸç‰¹å¤§ãƒœãƒ¼ãƒŠã‚¹ã¨ãƒšãƒŠãƒ«ãƒ†ã‚£ï¼ˆâ˜…çµ¶å¯¾ã«å‹è€…ãŒä¸Šå›ã‚‹ã‚ˆã†ã«ã™ã‚‹ï¼ï¼‰
+        if (m_winner == 1) {
+            m_p1FinalScore = p1Base + 50000; // å‹è€…ã¯åŸºç¤ç‚¹ ï¼‹ 5ä¸‡ç‚¹ã®ç‰¹å¤§ãƒœãƒ¼ãƒŠã‚¹
+            m_p2FinalScore = p2Base / 3;     // æ•—è€…ã¯ã‚¹ã‚³ã‚¢ã‚’ 1/3 ã«æ²¡åï¼ˆçµ¶å¯¾ã«å‹è€…ã«å±Šã‹ãªã„ï¼‰
+        }
+        else if (m_winner == 2) {
+            m_p2FinalScore = p2Base + 50000;
+            m_p1FinalScore = p1Base / 3;
+        }
+        else {
+            // å¼•ãåˆ†ã‘ã®å ´åˆ
+            m_p1FinalScore = p1Base;
+            m_p2FinalScore = p2Base;
+        }
+
+        // 3. ãƒ©ãƒ³ã‚¯ã®åˆ¤å®šï¼ˆâ˜…æ•—è€…ã¯å•ç­”ç„¡ç”¨ã§ã€Œæ•—ã€ã«ãªã‚‹ï¼‰
+        auto calcRank = [&](int score, bool isWinner, std::string& rankStr, unsigned int& rankCol) {
+            if (!isWinner) {
+                rankStr = "æ•—";
+                rankCol = GetColor(100, 100, 120); // æ•—åŒ—ç”¨ã®æš—ã„è‰²
+                return;
+            }
+
+            // å‹è€…ã®ã¿ã€ã‚¹ã‚³ã‚¢ã«å¿œã˜ã¦Sã€œDãƒ©ãƒ³ã‚¯ã®æ „èª‰ã‚’ä»˜ä¸ï¼
+            if (score >= 80000) { rankStr = "S"; rankCol = GetColor(255, 215, 0); } // é‡‘
+            else if (score >= 65000) { rankStr = "A"; rankCol = GetColor(255, 100, 100); } // èµ¤
+            else if (score >= 55000) { rankStr = "B"; rankCol = GetColor(100, 150, 255); } // é’
+            else if (score >= 45000) { rankStr = "C"; rankCol = GetColor(100, 255, 100); } // ç·‘
+            else { rankStr = "D"; rankCol = GetColor(200, 200, 200); } // ç°
+            };
+
+        calcRank(m_p1FinalScore, (m_winner == 1), m_p1Rank, m_p1RankCol);
+        calcRank(m_p2FinalScore, (m_winner == 2), m_p2Rank, m_p2RankCol);
+    }
     void ResultScene::Load() {}
     void ResultScene::LoadEnd() {}
 
-    // ==========================================
-    // XVˆ—: ƒ^ƒCƒgƒ‹‚Ö‚Ì‘JˆÚ“ü—Íó•t
-    // ==========================================
     void ResultScene::Update() {
-        ++m_frameCount;
+        m_frameCount++;
+        m_stateTimer++;
+        m_bgOffset += 2.0f;
 
-        // Å‰‚Ì1•bŠÔ‚ÍƒXƒLƒbƒv•s‰Â(‰‰oŠÔŠm•Û)
-        if (m_frameCount > 60) {
-            // SpaceAEnterAƒ}ƒEƒXƒNƒŠƒbƒN‚Åƒ^ƒCƒgƒ‹‚Ö
-            if (CheckHitKey(KEY_INPUT_SPACE) ||
-                CheckHitKey(KEY_INPUT_RETURN) ||
-                (GetMouseInput() & MOUSE_INPUT_LEFT)) {
-                SceneManager::GetInstance()->ChangeScene(SceneManager::SCENE_ID::TITLE);
+        switch (m_state) {
+        case State::FADE_IN:
+            if (m_stateTimer > 30) {
+                m_state = State::COUNT_STATS;
+                m_stateTimer = 0;
             }
+            break;
+
+        case State::COUNT_STATS:
+        {
+            float p = m_stateTimer / 60.0f;
+            if (p > 1.0f) p = 1.0f;
+            float ease = 1.0f - std::pow(1.0f - p, 3.0f);
+
+            m_dispTime = m_p1Stats.playTimeFrames * ease; // æ™‚é–“ã¨ã‚¿ãƒ¼ãƒ³ã¯å…±é€š
+            m_dispTurns = m_p1Stats.totalTurns * ease;
+
+            m_dispP1Moves = m_p1Stats.totalMoves * ease; m_dispP2Moves = m_p2Stats.totalMoves * ease;
+            m_dispP1Ops = m_p1Stats.totalOpsUsed * ease; m_dispP2Ops = m_p2Stats.totalOpsUsed * ease;
+            m_dispP1Dmg = m_p1Stats.maxDamage * ease;    m_dispP2Dmg = m_p2Stats.maxDamage * ease;
+
+            if (m_frameCount % 5 == 0) ProceduralAudio::GetInstance().PlayPowerSE(2);
+
+            if (m_stateTimer >= 60) {
+                m_dispTime = (float)m_p1Stats.playTimeFrames; m_dispTurns = (float)m_p1Stats.totalTurns;
+                m_dispP1Moves = (float)m_p1Stats.totalMoves; m_dispP2Moves = (float)m_p2Stats.totalMoves;
+                m_dispP1Ops = (float)m_p1Stats.totalOpsUsed; m_dispP2Ops = (float)m_p2Stats.totalOpsUsed;
+                m_dispP1Dmg = (float)m_p1Stats.maxDamage;    m_dispP2Dmg = (float)m_p2Stats.maxDamage;
+
+                m_state = State::WAIT_SCORE;
+                m_stateTimer = 0;
+            }
+            break;
+        }
+        case State::WAIT_SCORE:
+            if (m_stateTimer >= 20) { m_state = State::COUNT_SCORE; m_stateTimer = 0; }
+            break;
+        case State::COUNT_SCORE:
+        {
+            float p = m_stateTimer / 90.0f;
+            if (p > 1.0f) p = 1.0f;
+            float ease = 1.0f - std::pow(1.0f - p, 3.0f);
+
+            m_dispP1Score = m_p1FinalScore * ease;
+            m_dispP2Score = m_p2FinalScore * ease;
+
+            if (m_frameCount % 3 == 0) ProceduralAudio::GetInstance().PlayPowerSE(2);
+
+            if (m_stateTimer >= 90) {
+                m_dispP1Score = (float)m_p1FinalScore; m_dispP2Score = (float)m_p2FinalScore;
+                m_state = State::RANK_STAMP; m_stateTimer = 0;
+                ProceduralAudio::GetInstance().PlayPowerSE(6);
+            }
+            break;
+        }
+        case State::RANK_STAMP:
+            m_rankScale += (1.0f - m_rankScale) * 0.2f;
+            if (std::abs(1.0f - m_rankScale) < 0.05f) {
+                m_rankScale = 1.0f;
+                ProceduralAudio::GetInstance().PlayPowerSE(9);
+                m_state = State::WAIT_INPUT; m_stateTimer = 0;
+            }
+            break;
+        case State::WAIT_INPUT:
+            if (CheckHitKey(KEY_INPUT_SPACE) || CheckHitKey(KEY_INPUT_RETURN) || (GetMouseInput() & MOUSE_INPUT_LEFT)) {
+                SceneManager::GetInstance()->ChangeScene(SceneManager::SCENE_ID::TITLE);
+                ProceduralAudio::GetInstance().PlayPowerSE(9);
+            }
+            break;
         }
     }
 
-    // ==========================================
-    // •`‰æˆ—: ƒŠƒUƒ‹ƒg‰æ–Ê‚Ì•\¦
-    // ==========================================
     void ResultScene::Draw() {
-        int sw = 1920, sh = 1080;  // ‰æ–ÊƒTƒCƒY
+        int sw = 1920, sh = 1080;
+
+        unsigned int themeCol1P = GetColor(255, 140, 0); // 1Pã‚«ãƒ©ãƒ¼ï¼ˆã‚ªãƒ¬ãƒ³ã‚¸ï¼‰
+        unsigned int themeCol2P = GetColor(0, 150, 255); // 2Pã‚«ãƒ©ãƒ¼ï¼ˆé’ï¼‰
+        unsigned int winColor = (m_winner == 1) ? themeCol1P : (m_winner == 2) ? themeCol2P : GetColor(150, 150, 150);
 
         // ==========================================
-        // 1. ƒe[ƒ}ƒJƒ‰[İ’è(Ÿ”s‚ÅF‚ğØ‚è‘Ö‚¦)
+        // 1. èƒŒæ™¯æç”»
         // ==========================================
-        unsigned int themeColMain = m_isWin
-            ? GetColor(255, 165, 0)    // Ÿ—˜: ƒIƒŒƒ“ƒW
-            : GetColor(50, 100, 255);   // ”s–k: Â
-
-        unsigned int themeColSub = m_isWin
-            ? GetColor(255, 50, 0)      // Ÿ—˜: Ô
-            : GetColor(0, 200, 255);    // ”s–k: …F
-
-        unsigned int bgDarkCol = m_isWin
-            ? GetColor(30, 10, 0)       // Ÿ—˜: ˆÃ‚¢ƒIƒŒƒ“ƒW
-            : GetColor(0, 10, 30);      // ”s–k: ˆÃ‚¢Â
-
-        // ==========================================
-        // 2. ”wŒiƒVƒF[ƒ_[•`‰æ(ƒTƒCƒo[ƒOƒŠƒbƒhƒGƒtƒFƒNƒg)
-        // ==========================================
-        DrawBox(0, 0, sw, sh, bgDarkCol, TRUE);
+        DrawBox(0, 0, sw, sh, GetColor(5, 8, 15), TRUE);
 
         if (m_psHandle != -1 && m_cbHandle != -1) {
-            // ƒVƒF[ƒ_[ƒpƒ‰ƒ[ƒ^İ’è
             float* cb = (float*)GetBufferShaderConstantBuffer(m_cbHandle);
-            cb[0] = m_frameCount * 0.015f;  // ŠÔ(ƒAƒjƒ[ƒVƒ‡ƒ“—p)
-            cb[1] = (float)sw;               // ‰æ–Ê•
-            cb[2] = (float)sh;               // ‰æ–Ê‚‚³
-            cb[3] = 0.0f;                    // —\”õ
-            UpdateShaderConstantBuffer(m_cbHandle);
-            SetShaderConstantBuffer(m_cbHandle, DX_SHADERTYPE_PIXEL, 0);
+            if (cb) {
+                cb[0] = m_frameCount * 0.01f; cb[1] = (float)sw; cb[2] = (float)sh; cb[3] = 0.0f;
+                UpdateShaderConstantBuffer(m_cbHandle);
+                SetShaderConstantBuffer(m_cbHandle, DX_SHADERTYPE_PIXEL, 0);
 
-            // ƒVƒF[ƒ_[“K—p
-            SetUsePixelShader(m_psHandle);
-
-            // ’¸“_ƒf[ƒ^ì¬(‰æ–Ê‘S‘Ì‚ğ•¢‚¤2‚Â‚ÌOŠpŒ`)
-            VERTEX2DSHADER v[6];
-            for (int i = 0; i < 6; ++i) {
-                v[i].pos = VGet(0, 0, 0);
-                v[i].rhw = 1.0f;
-                v[i].dif = GetColorU8(
-                    (themeColMain >> 16) & 0xFF,
-                    (themeColMain >> 8) & 0xFF,
-                    themeColMain & 0xFF,
-                    255
-                );
-                v[i].spc = GetColorU8(0, 0, 0, 0);
+                SetUsePixelShader(m_psHandle);
+                VERTEX2DSHADER v[6];
+                for (int i = 0; i < 6; ++i) {
+                    v[i].pos = VGet(0, 0, 0); v[i].rhw = 1.0f;
+                    v[i].dif = GetColorU8((winColor >> 16) & 0xFF, (winColor >> 8) & 0xFF, winColor & 0xFF, 255);
+                    v[i].spc = GetColorU8(0, 0, 0, 0);
+                }
+                v[0].pos.x = 0;  v[0].pos.y = 0;  v[0].u = 0.0f; v[0].v = 0.0f;
+                v[1].pos.x = sw; v[1].pos.y = 0;  v[1].u = 1.0f; v[1].v = 0.0f;
+                v[2].pos.x = 0;  v[2].pos.y = sh; v[2].u = 0.0f; v[2].v = 1.0f;
+                v[3].pos.x = sw; v[3].pos.y = 0;  v[3].u = 1.0f; v[3].v = 0.0f;
+                v[4].pos.x = sw; v[4].pos.y = sh; v[4].u = 1.0f; v[4].v = 1.0f;
+                v[5].pos.x = 0;  v[5].pos.y = sh; v[5].u = 0.0f; v[5].v = 1.0f;
+                DrawPrimitive2DToShader(v, 6, DX_PRIMTYPE_TRIANGLELIST);
+                SetUsePixelShader(-1);
             }
+        }
+        SetDrawBlendMode(DX_BLENDMODE_ALPHA, 210); DrawBox(0, 0, sw, sh, GetColor(0, 0, 0), TRUE); SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
 
-            // UVÀ•Wİ’è(ƒeƒNƒXƒ`ƒƒƒ}ƒbƒsƒ“ƒO—p)
-            v[0].pos.x = 0;  v[0].pos.y = 0;  v[0].u = 0.0f; v[0].v = 0.0f;
-            v[1].pos.x = sw; v[1].pos.y = 0;  v[1].u = 1.0f; v[1].v = 0.0f;
-            v[2].pos.x = 0;  v[2].pos.y = sh; v[2].u = 0.0f; v[2].v = 1.0f;
-            v[3].pos.x = sw; v[3].pos.y = 0;  v[3].u = 1.0f; v[3].v = 0.0f;
-            v[4].pos.x = sw; v[4].pos.y = sh; v[4].u = 1.0f; v[4].v = 1.0f;
-            v[5].pos.x = 0;  v[5].pos.y = sh; v[5].u = 0.0f; v[5].v = 1.0f;
+        // ==========================================
+        // 2. å‹è€…ã‚¿ã‚¤ãƒˆãƒ«ã®æç”»
+        // ==========================================
+        std::string resultMain = (m_winner == 1) ? "1P VICTORY!!" : (m_winner == 2) ? "2P VICTORY!!" : "DRAW...";
+        int textW = GetDrawStringWidthToHandle(resultMain.c_str(), (int)resultMain.length(), m_fontTitle);
+        int titleX = sw / 2 - textW / 2;
+        int titleY = 60;
 
-            DrawPrimitive2DToShader(v, 6, DX_PRIMTYPE_TRIANGLELIST);
-            SetUsePixelShader(-1);
+        if (m_state != State::FADE_IN) {
+            float t = m_frameCount * 0.1f;
+            float glitchX = (std::sin(t * 15.0f) * std::cos(t * 22.0f)) * 8.0f;
+
+            SetDrawBlendMode(DX_BLENDMODE_ADD, 150);
+            DrawStringToHandle(titleX + (int)glitchX, titleY, resultMain.c_str(), GetColor(255, 0, 100), m_fontTitle);
+            DrawStringToHandle(titleX - (int)glitchX, titleY, resultMain.c_str(), GetColor(0, 150, 255), m_fontTitle);
+            SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+            DrawStringToHandle(titleX, titleY, resultMain.c_str(), winColor, m_fontTitle);
         }
 
-        // ”¼“§–¾ƒI[ƒo[ƒŒƒC(ƒVƒF[ƒ_[ƒGƒtƒFƒNƒg‚ğ—}‚¦‚é)
-        SetDrawBlendMode(DX_BLENDMODE_ALPHA, 180);
-        DrawBox(0, 0, sw, sh, bgDarkCol, TRUE);
+        // ==========================================
+        // 3. æˆ¦ç¸¾ãƒ‘ãƒãƒ« (2äººä¸¦ã³ãƒ¬ã‚¤ã‚¢ã‚¦ãƒˆï¼)
+        // ==========================================
+        int pX = sw / 2 - 600;
+        int pY = 220;
+        int pW = 1200;
+        int pH = 450;
+
+        if (m_state == State::FADE_IN) {
+            float inEase = m_stateTimer / 30.0f;
+            pY += (int)((1.0f - std::pow(1.0f - inEase, 3.0f)) * 100) - 100;
+            SetDrawBlendMode(DX_BLENDMODE_ALPHA, (int)(inEase * 255));
+        }
+
+        // æ ã¨èƒŒæ™¯
+        DrawBox(pX, pY, pX + pW, pY + pH, GetColor(15, 18, 25), TRUE);
+        DrawBox(pX, pY, pX + pW, pY + pH, GetColor(80, 80, 100), FALSE);
+
+        // ãƒ˜ãƒƒãƒ€ãƒ¼ï¼ˆ1Pã¨2Pï¼‰
+        DrawStringToHandle(pX + pW / 4 - 30, pY + 20, "1P", themeCol1P, m_fontNum);
+        DrawStringToHandle(pX + (pW * 3) / 4 - 30, pY + 20, "2P", themeCol2P, m_fontNum);
+        DrawLine(pX + 20, pY + 70, pX + pW - 20, pY + 70, GetColor(80, 80, 100), 2);
+
         SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
 
         // ==========================================
-        // 3. ƒ^ƒCƒgƒ‹ƒƒS(Ÿ—˜ or ”s–k)
+        // 4. å„ç¨®é …ç›®ã®æç”»ï¼ˆä¸­å¤®ã«é …ç›®åã€å·¦å³ã«å€¤ï¼‰
         // ==========================================
-        const char* resultMain = m_isWin ? "Ÿ—˜" : "”s–k";
-        SetFontSize(100);
-        int textW = GetDrawStringWidth(resultMain, (int)strlen(resultMain));
-        DrawString(sw / 2 - textW / 2, 120, resultMain, GetColor(255, 255, 255));
-
+// ==========================================
+        // 4. å„ç¨®é …ç›®ã®æç”»ï¼ˆä¸­å¤®ã«é …ç›®åã€å·¦å³ã«å€¤ï¼‰
         // ==========================================
-        // 4. íÑƒpƒlƒ‹(ƒXƒRƒAƒ{[ƒh)
-        // ==========================================
-        int panelX = sw / 2 - 400;
-        int panelY = 300;
+        auto drawCenterStat = [&](int yOffset, const char* label, int val1, int val2, const char* format = "%d") {
+            int drawY = pY + yOffset;
 
-        // ƒpƒlƒ‹”wŒi(”¼“§–¾‚ÌˆÃ‚¢‹éŒ`)
-        SetDrawBlendMode(DX_BLENDMODE_ALPHA, 200);
-        DrawBox(panelX, panelY, panelX + 800, panelY + 450, GetColor(10, 10, 15), TRUE);
-        SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+            // ä¸­å¤®ã®é …ç›®å
+            int lW = GetDrawStringWidthToHandle(label, (int)strlen(label), m_fontLabel);
+            DrawStringToHandle(pX + pW / 2 - lW / 2, drawY, label, GetColor(150, 180, 200), m_fontLabel);
 
-        // ƒpƒlƒ‹˜gü(ƒe[ƒ}ƒJƒ‰[)
-        DrawBox(panelX, panelY, panelX + 800, panelY + 450, themeColMain, FALSE);
+            char v1Str[64], v2Str[64];
+            if (std::string(label) == "ã‚¯ãƒªã‚¢ã‚¿ã‚¤ãƒ ") {
+                // è©¦åˆæ™‚é–“ã¯ä¸¡è€…å…±é€šï¼
+                int sec = val1 / 1000;
+                sprintf_s(v1Str, "%02d:%02d", sec / 60, sec % 60);
+                strcpy_s(v2Str, v1Str);
+            }
+            else if (std::string(label) == "ç·ã‚¿ãƒ¼ãƒ³æ•°") {
+                // ã‚¿ãƒ¼ãƒ³æ•°ã‚‚ä¸¡è€…å…±é€šï¼
+                sprintf_s(v1Str, format, val1);
+                strcpy_s(v2Str, v1Str);
+            }
+            else {
+                // ãã‚Œä»¥å¤–ã®å€‹åˆ¥ã‚¹ãƒ†ãƒ¼ã‚¿ã‚¹
+                sprintf_s(v1Str, format, val1);
+                sprintf_s(v2Str, format, val2);
+            }
 
-        // ==========================================
-        // 5. íÑ€–Ú‚Ì•`‰æ
-        // ==========================================
+            int v1W = GetDrawStringWidthToHandle(v1Str, (int)strlen(v1Str), m_fontNum);
+            int v2W = GetDrawStringWidthToHandle(v2Str, (int)strlen(v2Str), m_fontNum);
 
-        // •`‰æƒwƒ‹ƒp[ŠÖ”(ƒ‰ƒ€ƒ_®)
-        auto drawStat = [&](int yOffset, const char* label, const std::string& value, bool isHighlight = false) {
-            SetFontSize(40);
-            unsigned int color = isHighlight ? themeColMain : GetColor(200, 200, 200);
+            // â˜…ä¿®æ­£ï¼šãƒã‚¤ãƒ•ãƒ³ã«ã‚ˆã‚‹çœç•¥ã‚’ã‚„ã‚ã¦ã€1Pã«ã‚‚2Pã«ã‚‚ã—ã£ã‹ã‚Šæ•°å€¤ã‚’è¡¨ç¤ºï¼
+            DrawStringToHandle(pX + pW / 4 - v1W / 2, drawY - 10, v1Str, GetColor(255, 255, 255), m_fontNum);
+            DrawStringToHandle(pX + (pW * 3) / 4 - v2W / 2, drawY - 10, v2Str, GetColor(255, 255, 255), m_fontNum);
 
-            // ƒ‰ƒxƒ‹(¶Šñ‚¹)
-            DrawString(panelX + 80, panelY + yOffset, label, color);
-
-            // ’l(‰EŠñ‚¹)
-            int valW = GetDrawStringWidth(value.c_str(), (int)value.length());
-            DrawString(panelX + 720 - valW, panelY + yOffset, value.c_str(), GetColor(255, 255, 255));
-
-            // ‹æØ‚èü
-            DrawLine(panelX + 60, panelY + yOffset + 50, panelX + 740, panelY + yOffset + 50, GetColor(50, 50, 60), 1);
+            // åŒºåˆ‡ã‚Šç·š
+            DrawLine(pX + 50, drawY + 45, pX + pW - 50, drawY + 45, GetColor(40, 50, 60), 1);
             };
-
-        // ƒNƒŠƒAƒ^ƒCƒ€ŒvZ(ƒ~ƒŠ•b ¨ MM:SSŒ`®)
-        int totalSec = m_stats.playTimeFrames / 1000;
-        char timeStr[64];
-        sprintf_s(timeStr, "%02d : %02d", totalSec / 60, totalSec % 60);
-
-        // Še€–Ú‚ğ•\¦
-        drawStat(40, "ƒNƒŠƒAƒ^ƒCƒ€", timeStr);
-        drawStat(120, "‘ƒ^[ƒ“”", std::to_string(m_stats.totalTurns));
-        drawStat(200, "‘ˆÚ“®”", std::to_string(m_stats.totalMoves));
-        drawStat(280, "g—p‰‰Zq”", std::to_string(m_stats.totalOpsUsed));
-        drawStat(360, "Å‘åƒ_ƒ[ƒW / ƒXƒRƒA", std::to_string(m_stats.maxDamage), true);  // ƒnƒCƒ‰ƒCƒg•\¦
+        if (m_state != State::FADE_IN) {
+            drawCenterStat(90, "ã‚¯ãƒªã‚¢ã‚¿ã‚¤ãƒ ", (int)m_dispTime, 0);
+            drawCenterStat(160, "ç·ã‚¿ãƒ¼ãƒ³æ•°", (int)m_dispTurns, 0);
+            drawCenterStat(230, "ç·ç§»å‹•ãƒã‚¹æ•°", (int)m_dispP1Moves, (int)m_dispP2Moves);
+            drawCenterStat(300, "ä½¿ç”¨ã—ãŸæ¼”ç®—å­", (int)m_dispP1Ops, (int)m_dispP2Ops);
+            drawCenterStat(370, "æœ€å¤§ãƒ€ãƒ¡ãƒ¼ã‚¸", (int)m_dispP1Dmg, (int)m_dispP2Dmg);
+        }
 
         // ==========================================
-        // 6. ‘€ìƒKƒCƒh(“_–Å‰‰o)
+        // 5. æœ€çµ‚ã‚¹ã‚³ã‚¢ãƒ‘ãƒãƒ«ã¨ãƒ©ãƒ³ã‚¯ã‚¹ã‚¿ãƒ³ãƒ—
         // ==========================================
-        if (m_frameCount > 90) {  // 1.5•bŒã‚©‚ç•\¦
-            // ƒTƒCƒ“”g‚Å“§–¾“x‚ğ•Ï‰»‚³‚¹‚é(“_–ÅŒø‰Ê)
-            int pulseAlpha = 100 + (int)(std::sin(m_frameCount / 15.0f) * 100);
+        int sY = pY + pH + 30;
+        DrawBox(pX, sY, pX + pW, sY + 120, GetColor(15, 18, 25), TRUE);
+        DrawBox(pX, sY, pX + pW, sY + 120, winColor, FALSE);
+
+        if (m_state != State::FADE_IN) {
+            int lW = GetDrawStringWidthToHandle("æœ€çµ‚ã‚¹ã‚³ã‚¢", 10, m_fontLabel);
+            DrawStringToHandle(pX + pW / 2 - lW / 2, sY + 45, "æœ€çµ‚ã‚¹ã‚³ã‚¢", GetColor(255, 255, 255), m_fontLabel);
+
+            char s1[64], s2[64];
+            sprintf_s(s1, "%08d", (int)m_dispP1Score);
+            sprintf_s(s2, "%08d", (int)m_dispP2Score);
+
+            int s1W = GetDrawStringWidthToHandle(s1, (int)strlen(s1), m_fontTitle);
+            int s2W = GetDrawStringWidthToHandle(s2, (int)strlen(s2), m_fontTitle);
+
+            DrawStringToHandle(pX + pW / 4 - s1W / 2 + 30, sY + 10, s1, themeCol1P, m_fontTitle);
+            DrawStringToHandle(pX + (pW * 3) / 4 - s2W / 2 - 30, sY + 10, s2, themeCol2P, m_fontTitle);
+        }
+
+        if (m_state == State::RANK_STAMP || m_state == State::WAIT_INPUT) {
+            // 1Pã®ã‚¹ã‚¿ãƒ³ãƒ—
+            int r1W = GetDrawStringWidthToHandle(m_p1Rank.c_str(), (int)m_p1Rank.length(), m_fontRank);
+            int d1X = (pX + 80) - (int)(r1W * m_rankScale) / 2;
+            int d1Y = (sY + 60) - (int)(200 * m_rankScale) / 2;
+            DrawExtendStringFToHandle((float)d1X, (float)d1Y, m_rankScale, m_rankScale, m_p1Rank.c_str(), m_p1RankCol, m_fontRank);
+
+            // 2Pã®ã‚¹ã‚¿ãƒ³ãƒ—
+            int r2W = GetDrawStringWidthToHandle(m_p2Rank.c_str(), (int)m_p2Rank.length(), m_fontRank);
+            int d2X = (pX + pW - 80) - (int)(r2W * m_rankScale) / 2;
+            int d2Y = (sY + 60) - (int)(200 * m_rankScale) / 2;
+            DrawExtendStringFToHandle((float)d2X, (float)d2Y, m_rankScale, m_rankScale, m_p2Rank.c_str(), m_p2RankCol, m_fontRank);
+        }
+
+        // ==========================================
+        // 6. æ¬¡ã¸é€²ã‚€ãƒ—ãƒ­ãƒ³ãƒ—ãƒˆ
+        // ==========================================
+        if (m_state == State::WAIT_INPUT) {
+            int pulseAlpha = 150 + (int)(std::sin(m_frameCount / 10.0f) * 105);
             SetDrawBlendMode(DX_BLENDMODE_ALPHA, pulseAlpha);
-
-            SetFontSize(30);
-            const char* prompt = ">>ƒNƒŠƒbƒN‚©ƒXƒy[ƒX <<";
-            int pW = GetDrawStringWidth(prompt, (int)strlen(prompt));
-            DrawString(sw / 2 - pW / 2, sh - 150, prompt, GetColor(200, 200, 200));
-
+            const char* prompt = ">> ã‚¹ãƒšãƒ¼ã‚¹ ã‹ ã‚¯ãƒªãƒƒã‚¯ ã§ ã‚¿ã‚¤ãƒˆãƒ« ã¸ <<";
+            int pW2 = GetDrawStringWidthToHandle(prompt, (int)strlen(prompt), m_fontLabel);
+            DrawStringToHandle(sw / 2 - pW2 / 2, sh - 60, prompt, GetColor(255, 255, 255), m_fontLabel);
             SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
         }
     }
 
-    // ==========================================
-    // ‰ğ•úˆ—: ƒVƒF[ƒ_[ƒŠƒ\[ƒX‚Ìíœ
-    // ==========================================
     void ResultScene::Release() {
-        if (m_psHandle != -1) {
-            DeleteShader(m_psHandle);
-            m_psHandle = -1;
-        }
-        if (m_cbHandle != -1) {
-            DeleteShaderConstantBuffer(m_cbHandle);
-            m_cbHandle = -1;
-        }
+        if (m_psHandle != -1) { DeleteShader(m_psHandle); m_psHandle = -1; }
+        if (m_cbHandle != -1) { DeleteShaderConstantBuffer(m_cbHandle); m_cbHandle = -1; }
+        if (m_fontTitle != -1) { DeleteFontToHandle(m_fontTitle); m_fontTitle = -1; }
+        if (m_fontLabel != -1) { DeleteFontToHandle(m_fontLabel); m_fontLabel = -1; }
+        if (m_fontNum != -1) { DeleteFontToHandle(m_fontNum); m_fontNum = -1; }
+        if (m_fontRank != -1) { DeleteFontToHandle(m_fontRank); m_fontRank = -1; }
     }
 
 } // namespace App

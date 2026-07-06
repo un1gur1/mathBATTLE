@@ -146,10 +146,9 @@ namespace App {
             m_mapGrid.UpdateTurn();
         }
 
-        // ★ 修正：Moveではなく、必ず「TurnStart（カットイン）」フェーズへ移行する
         m_currentPhase = is1P ? Phase::P2_TurnStart : Phase::P1_TurnStart;
-        m_turnStartTimer = 80;
-        m_aiWaitTimer = 45;
+        m_turnStartTimer = 40;
+        m_aiWaitTimer = 35;
     }
 
     void BattleMaster::Init() {
@@ -189,7 +188,9 @@ namespace App {
         m_uiCursorX_2P = 0.0f;
 
         m_startTime = GetNowCount();
-        m_totalMoves = 0; m_totalOps = 0; m_maxDamage = 0;
+        m_p1TotalMoves = 0; m_p2TotalMoves = 0;
+        m_p1TotalOps = 0;   m_p2TotalOps = 0;
+        m_p1MaxDamage = 0;  m_p2MaxDamage = 0;
 
         m_psHandle = LoadPixelShaderFromMem(g_ps_CyberGrid, sizeof(g_ps_CyberGrid));
         m_cbHandle = CreateShaderConstantBuffer(sizeof(float) * 4);
@@ -199,6 +200,7 @@ namespace App {
         g_aiStayCount1P = 0;
         g_aiStayCount2P = 0;
 
+
         m_p1OpCostPending = false;
         m_p2OpCostPending = false;
 
@@ -206,8 +208,8 @@ namespace App {
         m_is1PWinner = false;
 
         m_currentPhase = Phase::P1_TurnStart;
-        m_turnStartTimer = 30; // 約1.3秒のカットイン演出
-        m_aiWaitTimer = 40;    // AIの初回思考時間
+        m_turnStartTimer = 80; // 約1.3秒のカットイン演出
+        m_aiWaitTimer = 30;    // AIの初回思考時間
         m_ui = std::make_unique<BattleUI>();
         m_ui->Init();
         int stageIdx = sm->GetStageIndex();
@@ -331,7 +333,8 @@ namespace App {
         std::queue<Vector2> autoPath;
         int dx = std::abs(targetGrid.x - pos.x);
         int dy = std::abs(targetGrid.y - pos.y);
-        m_totalMoves += std::max(dx, dy);
+        if (Is1PTurn()) m_p1TotalMoves += std::max(dx, dy);
+        else m_p2TotalMoves += std::max(dx, dy);
 
         std::string myName = Is1PTurn() ? "1P" : "2P";
 
@@ -586,9 +589,26 @@ namespace App {
                 auto& input = InputManager::GetInstance();
                 if (input.IsMouseLeftTrg() || input.IsTrgDown(KEY_INPUT_SPACE) || input.IsTrgDown(KEY_INPUT_RETURN)) {
                     int finalTimeMs = GetNowCount() - m_startTime;
-                    BattleStats stats = { m_mapGrid.GetTotalTurns(), m_totalMoves, m_totalOps, finalTimeMs, m_maxDamage };
+                    int turns = m_mapGrid.GetTotalTurns();
+
+                    // ① 1Pと2Pそれぞれの戦績データを作成
+                    BattleStats p1Stats = { turns, finalTimeMs, m_p1TotalMoves, m_p1TotalOps, m_p1MaxDamage };
+                    BattleStats p2Stats = { turns, finalTimeMs, m_p2TotalMoves, m_p2TotalOps, m_p2MaxDamage };
+
+                    // ② 「誰が勝ったのか（1=1P, 2=2P）」を正確に判定
+                    int winner = 0;
+                    if (m_ruleMode == RuleMode::ZERO_ONE) {
+                        Fraction goal(m_targetScore);
+                        if (m_p1ZeroOneScore == goal) winner = 1;
+                        else if (m_p2ZeroOneScore == goal) winner = 2;
+                    }
+                    else {
+                        winner = m_is1PWinner ? 1 : 2;
+                    }
+
+                    // ③ SceneManagerに渡して画面遷移！
                     auto* sm = SceneManager::GetInstance();
-                    sm->SetBattleResult(IsPlayerWin(), stats);
+                    sm->SetBattleResult(winner, p1Stats, p2Stats);
                     sm->ChangeScene(SceneManager::SCENE_ID::RESULT);
                 }
             }
@@ -779,7 +799,8 @@ namespace App {
 
         int dx = std::abs(bestTarget.x - myPos.x);
         int dy = std::abs(bestTarget.y - myPos.y);
-        m_totalMoves += std::max(dx, dy);
+        if (is1P) m_p1TotalMoves += std::max(dx, dy);
+        else m_p2TotalMoves += std::max(dx, dy);
 
         if (me->HasWarpNode(bestTarget) || isStay || (dx != dy && dx != 0 && dy != 0)) {
             screenPath.push(m_mapGrid.GetCellCenter(bestTarget.x, bestTarget.y));
@@ -1101,8 +1122,15 @@ namespace App {
             ProceduralAudio::GetInstance().PlayPowerSE(4);
         }
 
-        m_totalOps++;
-        if (std::abs(intRes) > m_maxDamage) m_maxDamage = std::abs(intRes);
+        bool is1P = (&attacker == m_player.get());
+        if (is1P) {
+            m_p1TotalOps++;
+            if (std::abs(intRes) > m_p1MaxDamage) m_p1MaxDamage = std::abs(intRes);
+        }
+        else {
+            m_p2TotalOps++;
+            if (std::abs(intRes) > m_p2MaxDamage) m_p2MaxDamage = std::abs(intRes);
+        }
 
         ApplyBattleResult(target, resFrac, intRes, aOp);
         attacker.SetOp('\0');
