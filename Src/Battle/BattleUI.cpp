@@ -36,6 +36,9 @@ namespace App {
         m_uiCursorX_1P = 0.0f;
         m_uiCursorX_2P = 0.0f;
         m_actionLog.clear();
+
+        m_commUI.Init();
+
     }
 
     void BattleUI::AddLog(const std::string& message) {
@@ -70,6 +73,7 @@ namespace App {
         updateCursor(m_uiCursorX_2P, p2Num);
         m_shaderTime += 0.0008f + (0.01f * effectIntensity);
 
+        m_commUI.Update();
         
     }
 
@@ -1015,6 +1019,7 @@ namespace App {
                 }
             }
         }
+        m_commUI.Draw();
     }
    
     void BattleUI::DrawEnemyDangerArea(const BattleMaster& master) const{

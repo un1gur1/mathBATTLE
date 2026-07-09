@@ -184,6 +184,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="Src\Battle\CommUI.cpp" />
     <ClCompile Include="Src\Manager\FadeManager.cpp" />
     <ClCompile Include="Src\Manager\AccumulationCalc.cpp" />
     <ClCompile Include="Src\Manager\NetworkManager.cpp" />
@@ -211,6 +212,7 @@
     <ClCompile Include="Src\Manager\TutorialMaster.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Src\Battle\CommUI.h" />
     <ClInclude Include="Src\Manager\FadeManager.h" />
     <ClInclude Include="Src\Manager\AccumulationCalc.h" />
     <ClInclude Include="Src\Manager\NetworkManager.h" />

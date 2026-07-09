@@ -583,6 +583,11 @@ namespace App {
     }
 
     void BattleMaster::Update() {
+
+        if (NetworkManager::GetInstance()) {
+            NetworkManager::GetInstance()->Update();
+        }
+
         if (m_currentPhase == Phase::FINISH) {
             m_finishTimer++;
             if (m_finishTimer > 60) {

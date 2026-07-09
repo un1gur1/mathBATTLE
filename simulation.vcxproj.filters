@@ -98,6 +98,7 @@
     <ClCompile Include="Src\Manager\NetworkManager.cpp" />
     <ClCompile Include="Src\Manager\AccumulationCalc.cpp" />
     <ClCompile Include="Src\Manager\FadeManager.cpp" />
+    <ClCompile Include="Src\Battle\CommUI.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Src\Application.h">
@@ -156,6 +157,7 @@
     <ClInclude Include="Src\Manager\NetworkManager.h" />
     <ClInclude Include="Src\Manager\AccumulationCalc.h" />
     <ClInclude Include="Src\Manager\FadeManager.h" />
+    <ClInclude Include="Src\Battle\CommUI.h" />
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="Src\PixelShader.hlsl">

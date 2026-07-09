@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <queue> // ← 追加：届いたデータを一時保存するトレイ用
 
 namespace App {
 
@@ -15,29 +16,55 @@ namespace App {
     };
 
     // ==========================================
-    // バトル設定パケット（ホストからクライアントへ送るデータ）
+    // パケットの種類（ID）を定義
     // ==========================================
+    enum class PacketID : int {
+        SETUP = 1,
+        BATTLE,
+        CHAT,
+        STAMP
+    };
+
+    // ==========================================
+    // 各種パケット構造体（先頭に必ずIDを持たせる）
+    // ==========================================
+
+    // バトル設定パケット
     struct SetupPacket {
+        PacketID id = PacketID::SETUP; // ← 追加
         int modeCursor;    // 0=クラシック, 1=ゼロワン
         int stocksCursor;  // 残機 (0, 1, 2)
         int scoreCursor;   // 目標スコア (0, 1, 2)
         int stageCursor;   // ステージ (0, 1, 2)
-        int p1StartNum; int p1StartX; int p1StartY; // 1P初期設定
-        int p2StartNum; int p2StartX; int p2StartY; // 2P初期設定
+        int p1StartNum; int p1StartX; int p1StartY;
+        int p2StartNum; int p2StartX; int p2StartY;
     };
 
-    // ==========================================
-    // バトル用パケット（ターンごとに送受信するデータ）
-    // ==========================================
     enum class NetAction {
         MOVE,   // 移動フェーズでの操作
         ACTION  // 行動（攻撃・待機）フェーズでの操作
     };
 
+    // バトル用パケット
     struct BattlePacket {
+        PacketID id = PacketID::BATTLE; // ← 追加
         NetAction actionType;
-        int targetX;  // クリックしたX座標
-        int targetY;  // クリックしたY座標
+        int targetX;
+        int targetY;
+    };
+
+    // チャット用パケット（追加）
+    struct ChatPacket {
+        PacketID id = PacketID::CHAT;
+        char message[256]; // DXLibで扱いやすい固定長配列
+    };
+
+    // 手書きスタンプ（軌跡）用パケット（追加）
+    struct StampPacket {
+        PacketID id = PacketID::STAMP;
+        int pointCount;            // 記録した座標の数
+        int pointsX[500];          // X座標の配列（最大500点）
+        int pointsY[500];          // Y座標の配列
     };
 
 
@@ -46,15 +73,13 @@ namespace App {
     // ==========================================
     class NetworkManager {
     public:
-        // 通信の現在の状態
         enum class State {
-            OFFLINE,            // オフライン（初期状態）
-            HOST_WAITING,       // ホストとしてTCP待機 ＆ UDPブロードキャスト中
-            CLIENT_SEARCHING,   // クライアントとしてUDP検索中
-            CONNECTED           // TCP接続完了（バトル中）
+            OFFLINE,
+            HOST_WAITING,
+            CLIENT_SEARCHING,
+            CONNECTED
         };
 
-        // シングルトン用関数
         static void CreateInstance();
         static NetworkManager* GetInstance();
         static void DeleteInstance();
@@ -63,30 +88,31 @@ namespace App {
         void Update();
         void Release();
 
-        // ------------------------------------------
-        // マッチング用関数
-        // ------------------------------------------
         bool StartHost(const std::string& playerName);
         bool StartSearch();
         std::vector<HostInfo> GetHostList() const;
         bool ConnectToHost(IPDATA targetIP);
         void Disconnect();
 
-        // 状態取得
         State GetState() const { return m_state; }
         std::string GetOpponentName() const { return m_oppName; }
-
-        // 自分がホスト（部屋を立てた側）かどうか
         bool IsHost() const { return m_isHost; }
 
         // ------------------------------------------
-        // パケットの送受信関数
+        // パケットの送信関数
         // ------------------------------------------
         void SendSetupPacket(const SetupPacket& packet);
-        bool ReceiveSetupPacket(SetupPacket& outPacket);
-
         void SendBattlePacket(const BattlePacket& packet);
+        void SendChatPacket(const ChatPacket& packet);
+        void SendStampPacket(const StampPacket& packet);
+
+        // ------------------------------------------
+        // パケットの受信関数（キューから取り出す）
+        // ------------------------------------------
+        bool ReceiveSetupPacket(SetupPacket& outPacket);
         bool ReceiveBattlePacket(BattlePacket& outPacket);
+        bool ReceiveChatPacket(ChatPacket& outPacket);
+        bool ReceiveStampPacket(StampPacket& outPacket);
 
     private:
         NetworkManager();
@@ -94,7 +120,6 @@ namespace App {
 
         static NetworkManager* s_instance;
 
-        // 定数群
         static constexpr int TCP_PORT = 54321;
         static constexpr int UDP_PORT = 54322;
         static constexpr int BROADCAST_INTERVAL = 60;
@@ -107,12 +132,18 @@ namespace App {
         int m_tcpHandle;
         int m_udpSocket;
         int m_broadcastTimer;
-
         bool m_isHost;
 
         std::unordered_map<std::string, HostInfo> m_hostList;
 
+        // 受信したデータを種類ごとに貯めておくキュー（トレイ）
+        std::queue<SetupPacket> m_setupQueue;
+        std::queue<BattlePacket> m_battleQueue;
+        std::queue<ChatPacket> m_chatQueue;
+        std::queue<StampPacket> m_stampQueue;
+
         std::string IpToString(IPDATA ip) const;
+        void ClearQueues(); // キューの中身を空にする処理
     };
 
 } // namespace App

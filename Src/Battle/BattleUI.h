@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include"CommUI.h"
 
 namespace App {
 
@@ -42,6 +43,8 @@ namespace App {
         float m_shaderTime;
 
         std::vector<std::string> m_actionLog;
+
+        CommUI m_commUI;
         int m_logScrollOffset;
 
         float m_uiCursorX_1P;
