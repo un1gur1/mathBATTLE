@@ -700,7 +700,8 @@ namespace App {
         DrawStringToHandle(1380, LOG_PANEL_Y + 90, " パワーが2, 5, 8 の時 2マス移動", GetColor(180, 180, 180), f22);
         DrawStringToHandle(1380, LOG_PANEL_Y + 130, " パワーが3, 6, 9 の時 1マス移動", GetColor(100, 150, 255), f22);
         DrawStringToHandle(1380, LOG_PANEL_Y + 180, "各演算子取得で移動方向追加", GetColor(255, 255, 180), f22);
-        DrawStringToHandle(1380, LOG_PANEL_Y + 215, " ÷ は (分子,分母)のマスにワープ設置", COL_INFO(), f22);
+        DrawStringToHandle(1380, LOG_PANEL_Y + 215, " ÷ は (分子,分母)のマスにワープ設置\nTでチャット\n右クリックの間お絵描き", COL_INFO(), f22);
+
 
         SetDrawBlendMode(DX_BLENDMODE_ALPHA, 200);
         DrawBox(600, BOTTOM_PANEL_Y, 1320, 940, COL_BOTTOM_BG(), TRUE);
@@ -807,8 +808,8 @@ namespace App {
                 DrawStringToHandle(672, calcY - 18, leftLabel.c_str(), leftCol, f16);
                 DrawStringToHandle(760, calcY - 18, rightLabel.c_str(), rightCol, f16);
 
-                DrawFormatStringToHandle(672, calcY, COL_TEXT_DARK(), f64, "%d %c %d =>", disp_aNum, disp_aOp, disp_tNum);
-                DrawFormatStringToHandle(670, calcY - 2, COL_TEXT_MAIN(), f64, "%d %c %d =>", disp_aNum, disp_aOp, disp_tNum);
+                DrawFormatStringToHandle(672, calcY, COL_TEXT_DARK(), f64, "%d %c %d =", disp_aNum, disp_aOp, disp_tNum);
+                DrawFormatStringToHandle(670, calcY - 2, COL_TEXT_MAIN(), f64, "%d %c %d =", disp_aNum, disp_aOp, disp_tNum);
 
                 unsigned int resColor = (intRes < 0) ? COL_DANGER() : (!isCleanDivide ? COL_DISABLE() : COL_SAFE());
                 DrawFormatStringToHandle(1032, calcY, COL_TEXT_DARK(), f64, "%s%d", (intRes > 0 ? "+" : ""), intRes);
