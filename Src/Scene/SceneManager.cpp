@@ -6,6 +6,8 @@
 #include "PauseMenu.h"
 #include "../Input/InputManager.h"
 #include "../Manager/ProceduralAudio.h"
+#include"../Manager/PostProcessManager.h"
+#include"../Manager/FadeManager.h"
 #include <utility>
 
 namespace App {
@@ -64,12 +66,22 @@ namespace App {
             delete pauseMenu_;
             pauseMenu_ = nullptr;
         }
+
+        if (PostProcessManager::GetInstance()) {
+            PostProcessManager::GetInstance()->Release();
+            PostProcessManager::DeleteInstance();
+        }
+
     }
 
     // ==========================================
     // 初期化: ゲーム開始時の設定
     // ==========================================
     void SceneManager::Init() {
+
+        PostProcessManager::CreateInstance();
+        PostProcessManager::GetInstance()->Init();
+
         isGameEnd_ = false;
         isChanging_ = false;
         isPaused_ = false;
@@ -153,16 +165,48 @@ namespace App {
     // 描画処理: シーンとポーズメニューの表示
     // ==========================================
     void SceneManager::Draw() {
-        // 1. 背面のゲーム画面を描画
+        auto* ppm = PostProcessManager::GetInstance();
+        if (ppm) ppm->BeginDraw();
+
         if (scene_) scene_->Draw();
 
-        // 2. ポーズ中ならメニューを重ねて描画
         if (isPaused_ && pauseMenu_) {
             pauseMenu_->Draw();
         }
 
-        // 3. ★追加：一番手前にブラインドフェードを描画！
-        m_fade.Draw();
+        m_fade.Draw(); // ※フェードマネージャーの内部は空っぽでOK
+
+        if (ppm) {
+            EffectType currentEffect = EffectType::NONE;
+            float intensity = 1.0f;
+            bool enableCrt = false; // ★CRTを重ねがけするかのフラグ
+
+            if (sceneId_ == SCENE_ID::TITLE) {
+                TitleScene* pTitle = dynamic_cast<TitleScene*>(scene_);
+                if (pTitle != nullptr) {
+                    if (pTitle->IsWarping()) {
+                        currentEffect = EffectType::TITLE_DIVE;
+                        intensity = pTitle->GetWarpProgress();
+                    }
+                    else if (pTitle->IsInStandby()) {
+                        currentEffect = EffectType::CRT;
+                    }
+                }
+            }
+
+            // ★ 起動時などのフェード中処理
+            if (m_fade.IsFading()) {
+                currentEffect = EffectType::FADE;
+                intensity = m_fade.GetProgress();
+
+                if (sceneId_ == SCENE_ID::TITLE) {
+                    enableCrt = true;
+                }
+            }
+
+            // 最後に第3引数として enableCrt を渡す
+            ppm->EndDraw(currentEffect, intensity, enableCrt);
+        }
     }
 
     void SceneManager::Delete() {

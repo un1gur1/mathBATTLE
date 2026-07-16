@@ -31,6 +31,8 @@ public:
     void Update();
     void Draw() const;
 
+    float GetProgress() const { return m_progress; }
+
     // 現在フェード中かどうか（シーンのUpdateを止める判定などに使う）
     bool IsFading() const { return m_state != State::NONE; }
 

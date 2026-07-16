@@ -99,6 +99,7 @@
     <ClCompile Include="Src\Manager\AccumulationCalc.cpp" />
     <ClCompile Include="Src\Manager\FadeManager.cpp" />
     <ClCompile Include="Src\Battle\CommUI.cpp" />
+    <ClCompile Include="Src\Manager\PostProcessManager.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Src\Application.h">
@@ -158,10 +159,17 @@
     <ClInclude Include="Src\Manager\AccumulationCalc.h" />
     <ClInclude Include="Src\Manager\FadeManager.h" />
     <ClInclude Include="Src\Battle\CommUI.h" />
+    <ClInclude Include="Src\Manager\PostProcessManager.h" />
   </ItemGroup>
   <ItemGroup>
-    <FxCompile Include="Src\PixelShader.hlsl">
+    <FxCompile Include="Src\Shader\PixelShader.hlsl">
       <Filter>Src</Filter>
     </FxCompile>
+    <FxCompile Include="Src\Shader\CRT.hlsl" />
+    <FxCompile Include="Src\Shader\Glitch.hlsl" />
+    <FxCompile Include="Src\Shader\CyberFade.hlsl" />
+    <FxCompile Include="Src\Shader\TitleDive.hlsl" />
+    <FxCompile Include="Src\Shader\CrystalOrb.hlsl" />
+    <FxCompile Include="Src\Shader\ImpactEffect.hlsl" />
   </ItemGroup>
 </Project>

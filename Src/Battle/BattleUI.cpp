@@ -4,7 +4,7 @@
 #include "../Manager/BattleMaster.h"
 #include"../Manager/TutorialMaster.h"
 #include "../Input/InputManager.h"
-#include "../../CyberGrid.h"
+#include "../Shader/CyberGrid.h"
 #include "../Utility/AppConfig.h" 
 #include <string>
 #include"../Object/Map/MapGrid.h"

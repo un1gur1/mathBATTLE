@@ -16,7 +16,9 @@ namespace App {
         // TitleState: 大枠のメニュー画面の状態
         // ==========================================
         enum class TitleState {
+           
             PRESS_START,    // [0] タイトルコール（スペースを押してね）
+            WARP_DIVE,
             MAIN_MENU,      // [1] トップメニュー（バトル、通信、チュートリアル等）
             BATTLE_SETUP,   // [2] オフラインバトルの詳細設定
             NETWORK_SETUP,  // [3] ★新規：通信対戦のマッチング画面
@@ -60,6 +62,10 @@ namespace App {
         void Draw() override;
         void Release() override;
 
+        bool IsInStandby() const { return m_titleState == TitleState::PRESS_START; }
+        bool IsWarping() const { return m_titleState == TitleState::WARP_DIVE; } // ★追加
+        float GetWarpProgress() const { return m_warpProgress; }
+
     private:
         static constexpr int GRID_SIZE = 9;
 
@@ -78,6 +84,15 @@ namespace App {
             int startX;
             int startY;
         };
+
+        struct BouncingOp {
+            float x, y;
+            float vx, vy;
+            float angle;
+            std::string symbol;
+            unsigned int color;
+        };
+        std::vector<BouncingOp> m_bouncingOps;
 
         // ==========================================
         // 状態管理・カーソル
@@ -115,7 +130,18 @@ namespace App {
 
         int m_psHandle = -1;
         int m_cbHandle = -1;
+
+        int m_psCrystalHandle = -1;
+        int m_cbCrystalHandle = -1;
+
+
+        int m_psImpactHandle = -1;
+        int m_cbImpactHandle = -1;
+        int m_impactType = 0;
+
         float m_shaderTime;
+
+        float m_warpProgress;
 
         AccumulationCalc m_miniGame;
     };

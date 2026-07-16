@@ -1,13 +1,16 @@
 ﻿#define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
-#include <DxLib.h> // ★必ず一番上に配置！
+#include <DxLib.h> 
 
 #include "TitleScene.h"
 #include "SceneManager.h"
 #include "../Input/InputManager.h" 
 #include "../Manager/ProceduralAudio.h"
 #include "../Manager/NetworkManager.h" 
-#include "../../CyberGrid.h"
+#include "../Shader/CyberGrid.h"
+#include "../Shader/CrystalOrbShader.h"
+#include "../Shader/ImpactEffectShader.h"
+
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
@@ -61,6 +64,7 @@ namespace {
         float x, y;
         float radius;
         float alpha;
+        unsigned int color;
     };
     std::vector<RippleEffect> g_ripples;
 }
@@ -122,9 +126,53 @@ namespace App {
         m_cbHandle = CreateShaderConstantBuffer(sizeof(float) * 4);
         m_shaderTime = 0.0f;
 
+        m_psCrystalHandle = LoadPixelShaderFromMem(g_ps_CrystalOrb, sizeof(g_ps_CrystalOrb));
+        m_cbCrystalHandle = CreateShaderConstantBuffer(sizeof(float) * 8);
         m_miniGame.NextStage(false);
 
+
+        m_psImpactHandle = LoadPixelShaderFromMem(g_ps_ImpactEffect, sizeof(g_ps_ImpactEffect));
+        m_cbImpactHandle = CreateShaderConstantBuffer(sizeof(float) * 8);
+        m_impactType = 2;
+
         g_ripples.clear(); 
+
+
+        m_miniGame.NextStage(false);
+        g_ripples.clear();
+
+        // ==========================================
+        // バウンド演算子の初期化（4つのアイテムを生成）
+        // ==========================================
+        m_bouncingOps.clear();
+        std::string symbols[4] = { "+", "-", "*", "/" };
+
+        // サイバー空間に映えるビビッドなネオンカラー（赤、緑、青、黄）
+        unsigned int opColors[4] = {
+            GetColor(255, 100, 100),
+            GetColor(100, 255, 100),
+            GetColor(100, 200, 255),
+            GetColor(255, 220, 50)
+        };
+
+        for (int i = 0; i < 4; ++i) {
+            BouncingOp op;
+            // 初期位置をランダムに分散
+            op.x = 200.0f + (GetNowCount() + i * 100) % 600;
+            op.y = 150.0f + (GetNowCount() + i * 50) % 300;
+
+            // アイテムごとにバラバラの速度と角度で飛ぶように計算
+            float speedX = 2.5f + (i * 0.5f);
+            float speedY = 3.0f - (i * 0.3f);
+            op.vx = (i % 2 == 0 ? speedX : -speedX);
+            op.vy = (i < 2 ? speedY : -speedY);
+
+            op.angle = 0.0f;
+            op.symbol = symbols[i];
+            op.color = opColors[i];
+            m_bouncingOps.push_back(op);
+        }
+        // ==========================================
 
         if (NetworkManager::GetInstance() == nullptr) {
             NetworkManager::CreateInstance();
@@ -148,6 +196,20 @@ namespace App {
 
         m_shaderTime += 0.0016f;
 
+        // ==========================================
+        // ★修正：入力をすべてここで一括取得・計算する！
+        // ==========================================
+        // 1. マウス入力と移動量の計算
+        Vector2 m = input.GetMousePos();
+        bool mClick = input.IsMouseLeftTrg();
+        static Vector2 prevM = m;
+
+        bool mouseMoved = (m.x != prevM.x || m.y != prevM.y); // メニューホバー用
+        float mouseVx = m.x - prevM.x; // 駒を投げるスピード用（X）
+        float mouseVy = m.y - prevM.y; // 駒を投げるスピード用（Y）
+        prevM = m; // 次のフレームのために現在の座標を保存
+
+        // 2. キーボード入力
         bool spaceTrg = input.IsTrgDown(KEY_INPUT_SPACE) || input.IsTrgDown(KEY_INPUT_RETURN);
         bool upTrg = input.IsTrgDown(KEY_INPUT_UP) || input.IsTrgDown(KEY_INPUT_W);
         bool downTrg = input.IsTrgDown(KEY_INPUT_DOWN) || input.IsTrgDown(KEY_INPUT_S);
@@ -162,34 +224,199 @@ namespace App {
             }
         }
 
-        Vector2 m = input.GetMousePos();
-        bool mClick = input.IsMouseLeftTrg();
-        static Vector2 prevM = m;
-        bool mouseMoved = (m.x != prevM.x || m.y != prevM.y);
-        prevM = m;
+        static int prevTab = 0;
+        int currentTab = CheckHitKey(KEY_INPUT_TAB);
+        if (currentTab == 1 && prevTab == 0) {
+            m_impactType = (m_impactType + 1) % 3;
+            ProceduralAudio::GetInstance().PlayPowerSE(5); // 切り替え音（これが鳴れば成功！）
+        }
+        prevTab = currentTab;
 
         // ==========================================
-        // ★追加：波紋エフェクトの更新処理
+          // バウンド演算子のマウス操作・移動・衝突処理
+          // ==========================================
+        int sw, sh;
+        GetDrawScreenSize(&sw, &sh);
+        float radius = 34.0f;
+        float diameter = radius * 2.0f;
+
+        static int grabbedIdx = -1;
+        bool isMouseHeld = (GetMouseInput() & MOUSE_INPUT_LEFT) != 0;
+        static bool prevMouseHeld = false;
+        bool justClicked = (isMouseHeld && !prevMouseHeld);
+        prevMouseHeld = isMouseHeld;
+
+        // クリックした瞬間、どの駒の上にいるか判定
+        if (justClicked) {
+            for (int i = (int)m_bouncingOps.size() - 1; i >= 0; --i) {
+                float dx = m.x - m_bouncingOps[i].x;
+                float dy = m.y - m_bouncingOps[i].y;
+                if (dx * dx + dy * dy < radius * radius) {
+                    grabbedIdx = i;
+                    ProceduralAudio::GetInstance().PlayPowerSE(2); // つかんだ音
+                    break;
+                }
+            }
+        }
+
+        if (grabbedIdx != -1) {
+            if (isMouseHeld) {
+                // つかんでいる間はマウス座標に強制移動
+                m_bouncingOps[grabbedIdx].x = m.x;
+                m_bouncingOps[grabbedIdx].y = m.y;
+                // マウスの動きをダイレクトに速度として持たせる
+                m_bouncingOps[grabbedIdx].vx = mouseVx * 1.5f;
+                m_bouncingOps[grabbedIdx].vy = mouseVy * 1.5f;
+            }
+            else {
+                grabbedIdx = -1; // 離した（スロー！）
+            }
+        }
+
+        // --- 移動・回転処理 ---
+        for (size_t i = 0; i < m_bouncingOps.size(); ++i) {
+            auto& op = m_bouncingOps[i];
+            if ((int)i != grabbedIdx) {
+                op.x += op.vx;
+                op.y += op.vy;
+                op.angle += op.vx * 0.02f + op.vy * 0.015f;
+            }
+        }
+
+        // --- 駒同士の衝突判定と弾き合い（カチン！とさせる物理演算） ---
+        for (size_t i = 0; i < m_bouncingOps.size(); ++i) {
+            for (size_t j = i + 1; j < m_bouncingOps.size(); ++j) {
+                auto& opA = m_bouncingOps[i];
+                auto& opB = m_bouncingOps[j];
+
+                float dx = opB.x - opA.x;
+                float dy = opB.y - opA.y;
+                float distance = std::sqrt(dx * dx + dy * dy);
+
+                if (distance < diameter) {
+                    // 1. 位置の補正（ブヨブヨ感を消すため、微小な隙間(0.1f)を空けて確実に引き剥がす）
+                    float overlap = diameter - distance + 0.1f;
+                    float nx = dx / (distance == 0.0f ? 1.0f : distance);
+                    float ny = dy / (distance == 0.0f ? 1.0f : distance);
+
+                    if ((int)i == grabbedIdx) {
+                        opB.x += nx * overlap; opB.y += ny * overlap;
+                    }
+                    else if ((int)j == grabbedIdx) {
+                        opA.x -= nx * overlap; opA.y -= ny * overlap;
+                    }
+                    else {
+                        opA.x -= nx * (overlap * 0.5f); opA.y -= ny * (overlap * 0.5f);
+                        opB.x += nx * (overlap * 0.5f); opB.y += ny * (overlap * 0.5f);
+                    }
+
+                    // 2. 速度の計算（質量と運動量保存の法則を用いたビリヤード物理）
+                    float kx = opA.vx - opB.vx;
+                    float ky = opA.vy - opB.vy;
+                    float vn = nx * kx + ny * ky;
+
+                    if (vn > 0.0f) {
+                        float e = 1.0f; // 反発係数（1.0 = カチンとエネルギーを完全に伝える硬質）
+
+                        if ((int)i == grabbedIdx) {
+                            // Aがマウスで掴まれている（Aは「質量無限大のハンマー」として振る舞う）
+                            float j_imp = (1.0f + e) * vn;
+                            opB.vx += nx * j_imp;
+                            opB.vy += ny * j_imp;
+                        }
+                        else if ((int)j == grabbedIdx) {
+                            // Bがマウスで掴まれている
+                            float j_imp = (1.0f + e) * vn;
+                            opA.vx -= nx * j_imp;
+                            opA.vy -= ny * j_imp;
+                        }
+                        else {
+                            // 互いにフリー（同じ重さのビリヤード球の衝突）
+                            float j_imp = (1.0f + e) * vn * 0.5f;
+                            opA.vx -= nx * j_imp;
+                            opA.vy -= ny * j_imp;
+                            opB.vx += nx * j_imp;
+                            opB.vy += ny * j_imp;
+                        }
+
+                        // マウス操作中も含め、当たったら必ずカン！と鳴らす
+                        ProceduralAudio::GetInstance().PlayPowerSE(2);
+                    }
+                }
+            }
+        }
+
+        // --- 画面外周の壁反射 ---
+        float maxSpeed = 30.0f; // 弾きすぎて消え去らないための速度リミッター
+        for (size_t i = 0; i < m_bouncingOps.size(); ++i) {
+            auto& op = m_bouncingOps[i];
+
+            if ((int)i != grabbedIdx) {
+                // 速度を一定に抑える
+                float speedSq = op.vx * op.vx + op.vy * op.vy;
+                if (speedSq > maxSpeed * maxSpeed) {
+                    float ratio = maxSpeed / std::sqrt(speedSq);
+                    op.vx *= ratio;
+                    op.vy *= ratio;
+                }
+            }
+
+            bool hitWall = false;
+            float hitX = op.x;
+            float hitY = op.y;
+
+            // 壁との反射判定 ＆ 激突した座標(hitX, hitY)の計算
+            if (op.x < radius) {
+                op.x = radius;
+                if ((int)i != grabbedIdx) op.vx *= -1.0f;
+                hitWall = true; hitX = 0;
+            }
+            else if (op.x > sw - radius) {
+                op.x = sw - radius;
+                if ((int)i != grabbedIdx) op.vx *= -1.0f;
+                hitWall = true; hitX = sw;
+            }
+
+            if (op.y < radius) {
+                op.y = radius;
+                if ((int)i != grabbedIdx) op.vy *= -1.0f;
+                hitWall = true; hitY = 0;
+            }
+            else if (op.y > sh - radius) {
+                op.y = sh - radius;
+                if ((int)i != grabbedIdx) op.vy *= -1.0f;
+                hitWall = true; hitY = sh;
+            }
+
+            // ★壁に激突した瞬間、その座標に「駒のパーソナルカラー」でエフェクトを発生させる！
+            if (hitWall) {
+                // alphaの初期値を220にすることで、Draw側のシェーダー進行度(progress)が0.0から始まります
+                g_ripples.push_back({ hitX, hitY, 10.0f, 220.0f, op.color });
+                ProceduralAudio::GetInstance().PlayPowerSE(2); // 壁衝突の音
+            }
+        }
+        // ==========================================
+
+        // ==========================================
+        // ★波紋エフェクトの更新処理
         // ==========================================
         if (mClick) {
-            // クリックした瞬間に新しい波紋を発生させる
-            g_ripples.push_back({ m.x, m.y, 0.0f, 200.0f });
+            g_ripples.push_back({ m.x, m.y, 0.0f, 200.0f, COL_TEXT_ON() });
         }
         for (auto& r : g_ripples) {
-            r.radius += 12.0f; // 広がるスピード
-            r.alpha -= 6.0f;   // 消えるスピード
+            r.radius += 12.0f;
+            r.alpha -= 6.0f;
         }
-        // 完全に透明になった波紋を削除
         g_ripples.erase(std::remove_if(g_ripples.begin(), g_ripples.end(), [](const RippleEffect& r) { return r.alpha <= 0; }), g_ripples.end());
+
+
         // ==========================================
-
-
+        // ★メニュー選択・カーソルホバー処理
+        // ==========================================
         auto HoverBox = [&](int x, int y, int w, int h) {
             return (m.x >= x && m.x <= x + w && m.y >= y && m.y <= y + h);
             };
 
-        int sw, sh;
-        GetDrawScreenSize(&sw, &sh);
         int CX = sw / 2;
         int CY = sh / 2;
         int menuStartY = CY + MENU_CENTER_OFFSET_Y;
@@ -204,6 +431,7 @@ namespace App {
             if (maxItems <= 0) return;
             for (int i = 0; i < maxItems; ++i) {
                 if (HoverBox(menuCX - MENU_BOX_HALF_W, menuStartY + MENU_ITEM_BASE_Y + i * MENU_ITEM_STEP_Y - MENU_BOX_OFFSET_Y, MENU_BOX_HALF_W * 2, MENU_BOX_H)) {
+                    // ★mouseMoved が正しく判定されるので、ここが復活します！
                     if (mouseMoved && cursor != i) {
                         cursor = i;
                         ProceduralAudio::GetInstance().PlayPowerSE(2);
@@ -215,10 +443,19 @@ namespace App {
             if (downTrg) { cursor++; if (cursor >= maxItems) cursor = 0; ProceduralAudio::GetInstance().PlayPowerSE(2); }
             };
 
+        // ... (これ以降の switch (m_titleState) { ... } の中身はそのままです！) ...
         switch (m_titleState) {
         case TitleState::PRESS_START:
             if (spaceTrg || mClick) {
                 ProceduralAudio::GetInstance().PlayPowerSE(9);
+                m_titleState = TitleState::WARP_DIVE;
+                m_warpProgress = 0.0f;
+            }
+            break;
+
+        case TitleState::WARP_DIVE:
+            m_warpProgress += 0.012f;
+            if (m_warpProgress >= 1.0f) {
                 m_titleState = TitleState::MAIN_MENU;
                 m_frameCount = 0;
             }
@@ -664,15 +901,104 @@ namespace App {
         SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
 
         DrawBox(0, 40, sw, 45, COL_P1(), TRUE);
+       
         DrawBox(0, sh - 45, sw, sh - 40, COL_P1(), TRUE);
+        
+  
+       // ==========================================
+       // ★修正：変数名を bOp に変更して、名前の衝突（エラー）を完全回避！
+       // ==========================================
+        if (m_psCrystalHandle != -1 && m_cbCrystalHandle != -1) {
+            SetDrawBlendMode(DX_BLENDMODE_ALPHA, 255); // 通常描画
 
-        // タイトルロゴ描画
+            double time = GetNowCount() / 1000.0;
+
+            for (const auto& bOp : m_bouncingOps) { // ★op から bOp に変更
+                // アイテム記号からシェーダーへ送るRGB値を決定
+                float r = 0.0f, g = 0.0f, b = 0.0f;
+                if (bOp.symbol == "+") { r = 0.85f; g = 0.10f; b = 0.20f; } // 赤
+                else if (bOp.symbol == "-") { r = 0.10f; g = 0.45f; b = 0.95f; } // 青
+                else if (bOp.symbol == "*") { r = 0.15f; g = 0.80f; b = 0.25f; } // 緑
+                else { r = 0.70f; g = 0.15f; b = 0.90f; } // 紫
+
+                // --- ① シェーダーを【ON】にして「クリスタル玉」を描く ---
+                SetUsePixelShader(m_psCrystalHandle);
+
+                // 定数バッファに時間、色、角度を転送
+                float* cb = (float*)GetBufferShaderConstantBuffer(m_cbCrystalHandle);
+                cb[0] = (float)time;
+                cb[1] = r; cb[2] = g; cb[3] = b;
+                cb[4] = bOp.angle; // ★bOp の角度を転送！
+                cb[5] = 0.0f; cb[6] = 0.0f; cb[7] = 0.0f;
+                UpdateShaderConstantBuffer(m_cbCrystalHandle);
+                SetShaderConstantBuffer(m_cbCrystalHandle, DX_SHADERTYPE_PIXEL, 0);
+
+                float size = 42.0f;
+                float cx = bOp.x; // ★bOp の座標を使用
+                float cy = bOp.y; // ★bOp の座標を使用
+
+                VERTEX2DSHADER v[6];
+                for (int i = 0; i < 6; ++i) {
+                    v[i].pos = VGet(0, 0, 0); v[i].rhw = 1.0f;
+                    v[i].dif = GetColorU8(255, 255, 255, 255);
+                    v[i].spc = GetColorU8(0, 0, 0, 0);
+                }
+                v[0].pos.x = cx - size; v[0].pos.y = cy - size; v[0].u = 0.0f; v[0].v = 0.0f;
+                v[1].pos.x = cx + size; v[1].pos.y = cy - size; v[1].u = 1.0f; v[1].v = 0.0f;
+                v[2].pos.x = cx - size; v[2].pos.y = cy + size; v[2].u = 0.0f; v[2].v = 1.0f;
+                v[3].pos.x = cx + size; v[3].pos.y = cy - size; v[3].u = 1.0f; v[3].v = 0.0f;
+                v[4].pos.x = cx + size; v[4].pos.y = cy + size; v[4].u = 1.0f; v[4].v = 1.0f;
+                v[5].pos.x = cx - size; v[5].pos.y = cy + size; v[5].u = 0.0f; v[5].v = 1.0f;
+
+                DrawPrimitive2DToShader(v, 6, DX_PRIMTYPE_TRIANGLELIST);
+
+                // --- ② シェーダーを【OFF】にしてから「文字」を回転描画する ---
+                SetUsePixelShader(-1);
+
+                // 文字の幅を取得し、回転の中心軸（ローカル座標）を設定
+                int tw = GetDrawStringWidthToHandle(bOp.symbol.c_str(), 1, m_fontNumber);
+                double rotCX = (double)tw / 2.0; // 幅の半分
+                double rotCY = 24.0;             // 高さの半分（フォントサイズ48想定）
+
+                // 引数順: x, y, ExRateX, ExRateY, RotCenterX, RotCenterY, RotAngle, Color, FontHandle, EdgeColor, VerticalFlag, String
+
+                // 深い影
+                DrawRotaStringToHandle(
+                    (int)cx + 2, (int)cy + 2, // x, y (画面の描画先座標)
+                    1.0, 1.0,                 // ExRateX, ExRateY (拡大率)
+                    rotCX, rotCY,             // RotCenterX, RotCenterY (回転の中心軸)
+                    (double)bOp.angle,        // RotAngle (回転角度)
+                    GetColor(10, 15, 30),     // Color (文字色)
+                    m_fontNumber,             // FontHandle
+                    0,                        // EdgeColor (フチ取りしないので0)
+                    FALSE,                    // VerticalFlag (縦書きしないのでFALSE)
+                    bOp.symbol.c_str()        // String
+                );
+
+                // 本体（白文字）
+                DrawRotaStringToHandle(
+                    (int)cx, (int)cy,         // x, y
+                    1.0, 1.0,                 // ExRateX, ExRateY
+                    rotCX, rotCY,             // RotCenterX, RotCenterY
+                    (double)bOp.angle,        // RotAngle
+                    GetColor(255, 255, 255),  // Color
+                    m_fontNumber,             // FontHandle
+                    0,                        // EdgeColor
+                    FALSE,                    // VerticalFlag
+                    bOp.symbol.c_str()        // String
+                );
+            } // forループの終わり
+
+            SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+        }
+
+
         const char* titleText = "超計算マスBATTLE";
         int titleW = GetDrawStringWidthToHandle(titleText, (int)strlen(titleText), m_fontTitle);
         double t = GetNowCount() / 1000.0;
         float floatY = (float)sin(t * 2.0) * 8.0f;
         int titleX = CX - titleW / 2;
-        int titleY = 100 + (int)floatY;
+        int titleY = 180 + (int)floatY;
 
         SetDrawBlendMode(DX_BLENDMODE_ADD, 120);
         for (int i = 0; i < 4; ++i) {
@@ -700,9 +1026,9 @@ namespace App {
         SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
         SetDrawArea(0, 0, sw, sh);
 
-        DrawLine(CX - 500, 230, CX + 500, 230, COL_TITLE_SUB(), 5);
+        DrawLine(CX - 500, 310, CX + 500, 310, COL_TITLE_SUB(), 5);
         SetDrawBlendMode(DX_BLENDMODE_ADD, 200);
-        DrawLine(CX - 500, 230, CX + 500, 230, COL_TITLE_MAIN(), 2);
+        DrawLine(CX - 500, 310, CX + 500, 310, COL_TITLE_MAIN(), 2);
         SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
 
         // 描画ヘルパー関数
@@ -978,15 +1304,53 @@ namespace App {
 
 
         // ==========================================
-        // ★追加：マウスクリック波紋エフェクトの描画（一番最後に描画して一番手前に表示）
-        // ==========================================
-        SetDrawBlendMode(DX_BLENDMODE_ADD, 255);
-        for (const auto& r : g_ripples) {
-            SetDrawBlendMode(DX_BLENDMODE_ADD, (int)r.alpha);
-            // COL_TEXT_ON (山吹色) で円を描画
-            DrawCircleAA(r.x, r.y, r.radius, 64, COL_TEXT_ON(), FALSE, 3.0f);
+                // ★修正：シェーダーを用いた3種の衝撃波（インパクト）描画
+                // ==========================================
+        if (m_psImpactHandle != -1 && m_cbImpactHandle != -1) {
+            SetUsePixelShader(m_psImpactHandle);
+            SetDrawBlendMode(DX_BLENDMODE_ADD, 255);
+
+            for (const auto& r : g_ripples) {
+                // r.alpha(220 -> 0) から進行度 progress(0.0 -> 1.0) を逆算
+                float progress = 1.0f - (r.alpha / 220.0f);
+                if (progress < 0.0f) progress = 0.0f;
+                if (progress > 1.0f) progress = 1.0f;
+
+                // 衝撃波の色のRGBを分解 (0.0~1.0)
+                float cr = ((r.color >> 16) & 0xFF) / 255.0f;
+                float cg = ((r.color >> 8) & 0xFF) / 255.0f;
+                float cb = ((r.color) & 0xFF) / 255.0f;
+
+                float* shaderParams = (float*)GetBufferShaderConstantBuffer(m_cbImpactHandle);
+                shaderParams[0] = progress;
+                shaderParams[1] = cr; shaderParams[2] = cg; shaderParams[3] = cb;
+                shaderParams[4] = (float)m_impactType; // 0, 1, 2 のどれか
+                shaderParams[5] = r.x; // 座標Xをシード値にして、割れる形を毎回ランダムに！
+                shaderParams[6] = 0.0f; shaderParams[7] = 0.0f;
+
+                UpdateShaderConstantBuffer(m_cbImpactHandle);
+                SetShaderConstantBuffer(m_cbImpactHandle, DX_SHADERTYPE_PIXEL, 0);
+
+                // シェーダーが描画するためのキャンバス（四角形）を作る
+                float size = 300.0f; // 衝撃波の最大サイズ（半径）
+                VERTEX2DSHADER v[6];
+                for (int i = 0; i < 6; ++i) {
+                    v[i].pos = VGet(0, 0, 0); v[i].rhw = 1.0f;
+                    v[i].dif = GetColorU8(255, 255, 255, 255);
+                    v[i].spc = GetColorU8(0, 0, 0, 0);
+                }
+                v[0].pos.x = r.x - size; v[0].pos.y = r.y - size; v[0].u = 0.0f; v[0].v = 0.0f;
+                v[1].pos.x = r.x + size; v[1].pos.y = r.y - size; v[1].u = 1.0f; v[1].v = 0.0f;
+                v[2].pos.x = r.x - size; v[2].pos.y = r.y + size; v[2].u = 0.0f; v[2].v = 1.0f;
+                v[3].pos.x = r.x + size; v[3].pos.y = r.y - size; v[3].u = 1.0f; v[3].v = 0.0f;
+                v[4].pos.x = r.x + size; v[4].pos.y = r.y + size; v[4].u = 1.0f; v[4].v = 1.0f;
+                v[5].pos.x = r.x - size; v[5].pos.y = r.y + size; v[5].u = 0.0f; v[5].v = 1.0f;
+
+                DrawPrimitive2DToShader(v, 6, DX_PRIMTYPE_TRIANGLELIST);
+            }
+            SetUsePixelShader(-1);
+            SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
         }
-        SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
         // ==========================================
     }
 
@@ -997,7 +1361,14 @@ namespace App {
         if (m_fontNumber != -1) DeleteFontToHandle(m_fontNumber);
 
         if (m_psHandle != -1)   DeleteShader(m_psHandle);
+        
         if (m_cbHandle != -1)   DeleteShaderConstantBuffer(m_cbHandle);
+    
+        if (m_psCrystalHandle != -1) DeleteShader(m_psCrystalHandle);
+        if (m_cbCrystalHandle != -1) DeleteShaderConstantBuffer(m_cbCrystalHandle);
+   
+        if (m_psImpactHandle != -1) DeleteShader(m_psImpactHandle);
+        if (m_cbImpactHandle != -1) DeleteShaderConstantBuffer(m_cbImpactHandle);
     }
 
 } // namespace App

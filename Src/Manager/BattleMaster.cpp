@@ -9,7 +9,7 @@
 #include "../Scene/SceneManager.h" 
 #include "NetworkManager.h" 
 #include "../Battle/BattleUI.h"
-#include "../../CyberGrid.h" 
+#include "../Shader/CyberGrid.h" 
 #include "ProceduralAudio.h"
 
 #ifndef M_PI
