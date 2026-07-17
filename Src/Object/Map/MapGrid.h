@@ -74,6 +74,9 @@ namespace App {
         int GetWidth() const { return WIDTH; }
         int GetHeight() const { return HEIGHT; }
 
+        void ClearItems();                                     // チュートリアル用：アイテム全消去
+        void SetItemAt(int x, int y, char symbol);
+
     private:
         // ==========================================
         // 定数

@@ -94,10 +94,10 @@ namespace App {
 
     public:
         enum class Phase {
-            P1_TurnStart, 
+            P1_TurnStart,
             P1_Move,
             P1_Action,
-            P2_TurnStart, 
+            P2_TurnStart,
             P2_Move,
             P2_Action,
             FINISH
@@ -164,16 +164,14 @@ namespace App {
         int  g_aiStayCount2P;
 
         // ---------- 演算子維持コスト ----------
-        // ターン開始時に演算子を保持していた場合に true。
-        // ターン終了時、まだ演算子を保持していればバッテリーを1消費する。
         bool m_p1OpCostPending = false;
         bool m_p2OpCostPending = false;
 
         bool m_isBattleFinished = false;
         bool m_is1PWinner = false;
 
-        float m_p1DisplayScore; // ★追加：1Pの表示用スコア（小数点つきで滑らかに動かす用）
-        float m_p2DisplayScore; // ★追加：2Pの表示用スコア
+        float m_p1DisplayScore;
+        float m_p2DisplayScore;
 
         // ---------- 演出 ----------
         int   m_finishTimer;
@@ -191,8 +189,8 @@ namespace App {
         int m_startTime;
         std::vector<std::string> m_actionLog;
 
-        int m_turnStartTimer; // カットイン演出用のタイマー
-        int m_aiWaitTimer;    // AIの思考時間（ウェイト）用タイマー
+        int m_turnStartTimer;
+        int m_aiWaitTimer;
 
         // ---------- ターン補助 ----------
         bool Is1PTurn() const;
@@ -214,7 +212,8 @@ namespace App {
         // ---------- バトル処理 ----------
         bool CanMove(int number, char op, IntVector2 start, IntVector2 target, int& outCost) const;
         void ExecuteBattle(UnitBase& attacker, UnitBase& defender, UnitBase& target);
-        void ApplyBattleResult(UnitBase& unit, const Fraction& resultFrac, int intRes, char op);
+        // ★修正：isCleanDivide を追加
+        void ApplyBattleResult(UnitBase& unit, const Fraction& resultFrac, int intRes, char op, bool isCleanDivide);
         void AddLog(const std::string& message);
 
         // ---------- AI ----------

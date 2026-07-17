@@ -1,125 +1,165 @@
+#define NOMINMAX
 #include "Enemy.h"
 #include <DxLib.h>
 #include <cmath>
 #include <string>
+#include <unordered_map> // ★追加
+
+#include "../../../Shader/CrystalOrbShader.h" 
 
 namespace App {
 
-	// ==========================================
-	// コンストラクタ: 敵ユニットの初期化
-	// ==========================================
-	Enemy::Enemy(IntVector2 startGrid, Vector2 startScreen, int number, int stocks, int maxStocks)
-		: UnitBase("Enemy", startGrid, startScreen, number, stocks, maxStocks)
-	{
-		// 敵の色: 鮮やかな紺色（プレイヤーのオレンジと対比）
-		m_color = GetColor(20, 40, 160);
-	}
+    static int g_psEnemyCrystalHandle = -1;
+    static int g_cbEnemyCrystalHandle = -1;
+    static int g_enemyFontHandle = -1;
+    static int g_enemyBadgeFontHandle = -1;
 
-	// ==========================================
-	// 敵ユニットの描画: 紺色クリスタルの浮遊表現
-	// ==========================================
-	void Enemy::DrawUnitGraphic() {
-		// 時間に基づくアニメーション計算
-		double time = GetNowCount() / 1000.0;  // 現在時刻（秒）
-		float bobbing = (float)(sin(time * 2.0) * 4.0);  // 上下浮遊（-4.0 ~ +4.0）
+    Enemy::Enemy(IntVector2 startGrid, Vector2 startScreen, int number, int stocks, int maxStocks)
+        : UnitBase("Enemy", startGrid, startScreen, number, stocks, maxStocks)
+    {
+        m_color = GetColor(0, 100, 255);
 
-		// 座標計算
-		float x = m_screenPos.x;        // 画面X座標
-		float y = m_screenPos.y;        // 画面Y座標（基準位置）
-		float unitY = y + bobbing;      // 浮遊を加えた実際のY座標
+        if (g_psEnemyCrystalHandle == -1) {
+            g_psEnemyCrystalHandle = LoadPixelShaderFromMem(g_ps_CrystalOrb, sizeof(g_ps_CrystalOrb));
+            g_cbEnemyCrystalHandle = CreateShaderConstantBuffer(sizeof(float) * 8);
+            g_enemyFontHandle = CreateFontToHandle("HGP創英角ﾎﾟｯﾌﾟ体", 40, 2, DX_FONTTYPE_ANTIALIASING);
+            g_enemyBadgeFontHandle = CreateFontToHandle("HGP創英角ﾎﾟｯﾌﾟ体", 26, 2, DX_FONTTYPE_ANTIALIASING);
+        }
+    }
 
-		// ==========================================
-		// 1. 影の描画（足元に固定）
-		// ==========================================
-		// 浮遊に応じて影の濃さと大きさを変化させる
-		// 高く浮くほど影は薄く小さくなる
-		SetDrawBlendMode(DX_BLENDMODE_ALPHA, (int)(130 - (bobbing + 4.0f) * 5.0f));
-		DrawOvalAA(
-			x, y + 28.0f,                        // 影の位置（足元固定）
-			24.0f - bobbing / 2.0f,              // 横幅（浮遊で変化）
-			12.0f - bobbing / 4.0f,              // 縦幅（浮遊で変化）
-			64,                                   // 分割数（滑らかさ）
-			GetColor(0, 0, 0),                   // 黒
-			TRUE                                  // 塗りつぶし
-		);
-		SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+    static void DrawHexagonAA_Enemy(float cx, float cy, float radius, unsigned int color, bool fill, float thickness = 1.0f, float rotAngle = 0.0f) {
+        float angleOffsets[6] = { 0.0f, 60.0f, 120.0f, 180.0f, 240.0f, 300.0f };
+        float rad = 3.14159265f / 180.0f;
+        if (fill) {
+            for (int i = 0; i < 6; ++i) {
+                float a1 = angleOffsets[i] * rad + rotAngle; float a2 = angleOffsets[(i + 1) % 6] * rad + rotAngle;
+                DrawTriangleAA(cx, cy, cx + cos(a1) * radius, cy + sin(a1) * radius, cx + cos(a2) * radius, cy + sin(a2) * radius, color, TRUE);
+            }
+        }
+        else {
+            for (int i = 0; i < 6; ++i) {
+                float a1 = angleOffsets[i] * rad + rotAngle; float a2 = angleOffsets[(i + 1) % 6] * rad + rotAngle;
+                DrawLineAA(cx + cos(a1) * radius, cy + sin(a1) * radius, cx + cos(a2) * radius, cy + sin(a2) * radius, color, thickness);
+            }
+        }
+    }
 
-		// ==========================================
-		// 2. 本体: 紺色クリスタルの描画
-		// ==========================================
+    void Enemy::DrawUnitGraphic() {
+        double time = GetNowCount() / 1000.0;
+        float bobbing = (float)(sin(time * 3.0 + 3.14) * 4.0);
 
-		// 外側の暗い縁取り（立体感）
-		DrawCircleAA(x, unitY, 30.0f, 64, GetColor(10, 15, 50), TRUE);
+        float x = m_screenPos.x;
+        float y = m_screenPos.y;
+        float unitY = y + bobbing;
 
-		// メインボディ（紺色）
-		DrawCircleAA(x, unitY, 26.0f, 64, m_color, TRUE);
+        // 1. シャドウ
+        SetDrawBlendMode(DX_BLENDMODE_ALPHA, (int)(80 - (bobbing + 4.0f) * 5.0f));
+        DrawOvalAA(x, y + 32.0f, 24.0f - bobbing / 2.0f, 8.0f - bobbing / 4.0f, 64, GetColor(0, 20, 80), TRUE);
+        SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
 
-		// 内側の光（加算合成で光沢表現）
-		SetDrawBlendMode(DX_BLENDMODE_ADD, 100);
-		DrawCircleAA(x, unitY, 24.0f, 64, GetColor(20, 60, 150), TRUE);
-		SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+        // 2. アウター・ヘックスシールド
+        float pulse = (float)(sin(time * 6.0 + 3.14) * 0.5 + 0.5);
+        float hexRot = (float)-time * 1.2f;
 
-		// 輪郭線（明るい青で縁取り）
-		DrawCircleAA(x, unitY, 26.0f, 64, GetColor(180, 220, 255), FALSE, 2.0f);
+        SetDrawBlendMode(DX_BLENDMODE_ADD, 150 + (int)(pulse * 50));
+        DrawHexagonAA_Enemy(x, unitY, 34.0f, m_color, FALSE, 3.0f, hexRot);
+        DrawHexagonAA_Enemy(x, unitY, 30.0f, m_color, FALSE, 1.0f, -hexRot * 0.8f);
+        SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
 
-		// ハイライト（左上の光反射表現）
-		SetDrawBlendMode(DX_BLENDMODE_ALPHA, 160);
-		DrawCircleAA(x - 8.0f, unitY - 8.0f, 7.0f, 32, GetColor(200, 220, 255), TRUE);
-		SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+        // 3. インナーコア
+        if (g_psEnemyCrystalHandle != -1 && g_cbEnemyCrystalHandle != -1) {
+            SetUsePixelShader(g_psEnemyCrystalHandle);
+            SetDrawBlendMode(DX_BLENDMODE_ALPHA, 255);
 
-		// ==========================================
-		// 3. 数値表示: ユニットの現在値
-		// ==========================================
-		int currentNum = GetNumber();
-		SetFontSize(36);
-		std::string numStr = std::to_string(currentNum);
-		int numWidth = GetDrawStringWidth(numStr.c_str(), (int)numStr.length());
+            float r = 0.0f, g = 0.35f, b = 1.0f;
+            float* cb = (float*)GetBufferShaderConstantBuffer(g_cbEnemyCrystalHandle);
+            cb[0] = (float)time; cb[1] = r; cb[2] = g; cb[3] = b;
+            cb[4] = 0.0f; cb[5] = 0.0f; cb[6] = 0.0f; cb[7] = 0.0f;
+            UpdateShaderConstantBuffer(g_cbEnemyCrystalHandle);
+            SetShaderConstantBuffer(g_cbEnemyCrystalHandle, DX_SHADERTYPE_PIXEL, 0);
 
-		// 影付きテキスト（視認性向上）
-		DrawString(
-			(int)x - numWidth / 2 + 2,          // 影のX座標（少しずらす）
-			(int)unitY - 16 + 2,                // 影のY座標（少しずらす）
-			numStr.c_str(),
-			GetColor(0, 0, 40)                   // 暗い青（影）
-		);
-		DrawString(
-			(int)x - numWidth / 2,              // メインのX座標（中央揃え）
-			(int)unitY - 16,                    // メインのY座標
-			numStr.c_str(),
-			GetColor(255, 255, 255)              // 白（本体）
-		);
+            float size = 28.0f;
+            VERTEX2DSHADER v[6];
+            for (int i = 0; i < 6; ++i) {
+                v[i].pos = VGet(0, 0, 0); v[i].rhw = 1.0f;
+                v[i].dif = GetColorU8(255, 255, 255, 255); v[i].spc = GetColorU8(0, 0, 0, 0);
+            }
+            v[0].pos.x = x - size; v[0].pos.y = unitY - size; v[0].u = 0.0f; v[0].v = 0.0f;
+            v[1].pos.x = x + size; v[1].pos.y = unitY - size; v[1].u = 1.0f; v[1].v = 0.0f;
+            v[2].pos.x = x - size; v[2].pos.y = unitY + size; v[2].u = 0.0f; v[2].v = 1.0f;
+            v[3].pos.x = x + size; v[3].pos.y = unitY - size; v[3].u = 1.0f; v[3].v = 0.0f;
+            v[4].pos.x = x + size; v[4].pos.y = unitY + size; v[4].u = 1.0f; v[4].v = 1.0f;
+            v[5].pos.x = x - size; v[5].pos.y = unitY + size; v[5].u = 0.0f; v[5].v = 1.0f;
 
-		// ==========================================
-		// 4. 演算子バッジ: 取得中のアイテム表示
-		// ==========================================
-		char currentOp = GetOp();
-		if (currentOp != '\0') {  // 演算子を持っている場合のみ描画
-			// バッジの配置（右下）
-			float bx = x + 20.0f;
-			float by = unitY + 18.0f;
+            DrawPrimitive2DToShader(v, 6, DX_PRIMTYPE_TRIANGLELIST);
+            SetUsePixelShader(-1);
+            SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+        }
 
-			// 後光エフェクト（加算合成で発光）
-			SetDrawBlendMode(DX_BLENDMODE_ADD, 130);
-			DrawCircleAA(bx, by, 15.0f, 32, GetColor(255, 220, 50), TRUE);
-			SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+        // ==========================================
+        // 4. 数値表示（★パラパラと減るアニメーション！）
+        // ==========================================
+        static std::unordered_map<const Enemy*, float> s_displayTotalMap;
 
-			// バッジ本体（白い円）
-			DrawCircleAA(bx, by, 13.0f, 32, GetColor(255, 255, 255), TRUE);
+        int actualStocks = GetStocks();
+        int actualNum = GetNumber();
+        int actualTotal = actualStocks * 9 + (actualNum - 1); // 残機を含めた総合パワー
 
-			// バッジの縁取り（暗い青）
-			DrawCircleAA(bx, by, 13.0f, 32, GetColor(0, 0, 40), FALSE, 2.0f);
+        // 初回表示時
+        if (s_displayTotalMap.find(this) == s_displayTotalMap.end()) {
+            s_displayTotalMap[this] = (float)actualTotal;
+        }
 
-			// 演算子記号の描画
-			SetFontSize(22);
-			char opStr[2] = { currentOp, '\0' };  // 文字列化
-			int opW = GetDrawStringWidth(opStr, 1);
-			DrawString(
-				(int)bx - opW / 2,              // 中央揃え
-				(int)by - 11,                   // 垂直中央
-				opStr,
-				GetColor(0, 0, 0)                // 黒（視認性）
-			);
-		}
-	}
+        float& displayTotal = s_displayTotalMap[this];
+
+        if (std::abs(displayTotal - actualTotal) > 30.0f) {
+            displayTotal = (float)actualTotal;
+        }
+
+        unsigned int numColor = GetColor(255, 255, 255);
+
+        // パラパラ演出
+        if (displayTotal > actualTotal) {
+            displayTotal -= 0.18f;
+            if (displayTotal < actualTotal) displayTotal = (float)actualTotal;
+            numColor = GetColor(255, 100, 100); // 減少中は赤く光る！
+        }
+        else if (displayTotal < actualTotal) {
+            displayTotal += 0.18f;
+            if (displayTotal > actualTotal) displayTotal = (float)actualTotal;
+            numColor = GetColor(100, 255, 150); // 増加中は緑に光る！
+        }
+
+        int displayTotalInt = (int)std::round(displayTotal);
+        int currentNum = (displayTotalInt % 9) + 1;
+        if (displayTotalInt < 0) currentNum = 0;
+
+        std::string numStr = std::to_string(currentNum);
+        int numWidth = GetDrawStringWidthToHandle(numStr.c_str(), (int)numStr.length(), g_enemyFontHandle);
+
+        DrawStringToHandle((int)x - numWidth / 2 + 2, (int)unitY - 20 + 2, numStr.c_str(), GetColor(0, 10, 30), g_enemyFontHandle);
+        DrawStringToHandle((int)x - numWidth / 2, (int)unitY - 20, numStr.c_str(), numColor, g_enemyFontHandle); // ★色を適用
+
+        // 5. 演算子バッジ
+        char currentOp = GetOp();
+        if (currentOp != '\0') {
+            float bx = x + 24.0f;
+            float by = unitY + 18.0f;
+
+            unsigned int glowCol, baseCol, edgeCol, shadowCol;
+            if (currentOp == '+') { glowCol = GetColor(255, 50, 50); baseCol = GetColor(40, 10, 10); edgeCol = GetColor(255, 100, 100); shadowCol = GetColor(150, 0, 0); }
+            else if (currentOp == '-') { glowCol = GetColor(50, 150, 255); baseCol = GetColor(10, 20, 40); edgeCol = GetColor(100, 200, 255); shadowCol = GetColor(0, 50, 150); }
+            else if (currentOp == '*') { glowCol = GetColor(50, 255, 100); baseCol = GetColor(10, 40, 15); edgeCol = GetColor(100, 255, 150); shadowCol = GetColor(0, 150, 50); }
+            else { glowCol = GetColor(200, 50, 255); baseCol = GetColor(30, 10, 40); edgeCol = GetColor(220, 100, 255); shadowCol = GetColor(100, 0, 150); }
+
+            SetDrawBlendMode(DX_BLENDMODE_ADD, 200); DrawHexagonAA_Enemy(bx, by, 18.0f, glowCol, TRUE); SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+            DrawHexagonAA_Enemy(bx, by, 15.0f, baseCol, TRUE); DrawHexagonAA_Enemy(bx, by, 15.0f, edgeCol, FALSE, 2.0f);
+
+            char opStr[2] = { currentOp, '\0' };
+            int opW = GetDrawStringWidthToHandle(opStr, 1, g_enemyBadgeFontHandle);
+            DrawStringToHandle((int)bx - opW / 2 + 1, (int)by - 13 + 1, opStr, shadowCol, g_enemyBadgeFontHandle);
+            DrawStringToHandle((int)bx - opW / 2, (int)by - 13, opStr, GetColor(255, 255, 255), g_enemyBadgeFontHandle);
+        }
+    }
 
 } // namespace App

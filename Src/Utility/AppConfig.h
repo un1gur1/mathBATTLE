@@ -31,5 +31,6 @@ namespace App {
         inline unsigned int COL_INFO() { return GetColor(200, 100, 255); }
         inline unsigned int COL_DISABLE() { return GetColor(150, 150, 150); }
         inline unsigned int COL_TEXT_OFF() { return GetColor(120, 120, 120); }
+        inline unsigned int COL_WHITE() { return GetColor(255, 255, 255); }
     }
 }

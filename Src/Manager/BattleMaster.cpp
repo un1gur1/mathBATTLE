@@ -16,9 +16,6 @@
 #define M_PI 3.14159265358979323846
 #endif
 
-// ==========================================
-// マジックナンバーを排除するための定数・色定義
-// ==========================================
 namespace {
     constexpr int SCREEN_W = 1920;
     constexpr int SCREEN_H = 1080;
@@ -123,6 +120,9 @@ namespace App {
             ": 演算子負荷を検知。ターン終了時に保持中ならバッテリーが 1 減少します。");
     }
 
+    // ==========================================
+    // ★修正：演算子保持によるバッテリー消費（死亡判定付き）
+    // ==========================================
     void BattleMaster::ApplyOperatorUpkeepCost(bool is1P) {
         if (m_ruleMode != RuleMode::CLASSIC) return;
 
@@ -131,11 +131,17 @@ namespace App {
 
         UnitBase* unit = GetUnitBySide(is1P);
         if (unit && unit->GetOp() != '\0') {
-            unit->AddStocks(-1);
-            AddLog(std::string("【負荷】 ") + (is1P ? "1P" : "2P") +
-                ": 演算子を保持していたため、バッテリーが 1 減少しました。");
+            if (unit->GetStocks() <= 0) {
+                SetClassicDefeat(*unit, "演算子の過負荷");
+                ProceduralAudio::GetInstance().PlayErrorSE();
+            }
+            else {
+                unit->AddStocks(-1);
+                AddLog(std::string("【負荷】 ") + (is1P ? "1P" : "2P") +
+                    ": 演算子を保持していたため、バッテリーが 1 減少しました。");
+                ProceduralAudio::GetInstance().PlayErrorSE();
+            }
         }
-
         pending = false;
     }
 
@@ -161,7 +167,6 @@ namespace App {
         m_p1ZeroOneScore = Fraction(0, 1);
         m_p2ZeroOneScore = Fraction(0, 1);
 
-        // ★ 新規：表示用スコアの初期化
         m_p1DisplayScore = 0.0f;
         m_p2DisplayScore = 0.0f;
 
@@ -200,7 +205,6 @@ namespace App {
         g_aiStayCount1P = 0;
         g_aiStayCount2P = 0;
 
-
         m_p1OpCostPending = false;
         m_p2OpCostPending = false;
 
@@ -208,8 +212,8 @@ namespace App {
         m_is1PWinner = false;
 
         m_currentPhase = Phase::P1_TurnStart;
-        m_turnStartTimer = 80; // 約1.3秒のカットイン演出
-        m_aiWaitTimer = 30;    // AIの初回思考時間
+        m_turnStartTimer = 80;
+        m_aiWaitTimer = 30;
         m_ui = std::make_unique<BattleUI>();
         m_ui->Init();
         int stageIdx = sm->GetStageIndex();
@@ -375,6 +379,10 @@ namespace App {
             std::string name = is1P ? "1P" : "2P";
             AddLog("【取得】 " + name + "が [" + std::string(1, pickedItem) + "] を取得！");
 
+            // ★ 新たに取得した場合はペナルティをリセット！
+            if (is1P) m_p1OpCostPending = false;
+            else m_p2OpCostPending = false;
+
             if (pickedItem == '+') ProceduralAudio::GetInstance().PlayPowerSE(5);
             else if (pickedItem == '-') ProceduralAudio::GetInstance().PlayPowerSE(2);
             else if (pickedItem == '*') ProceduralAudio::GetInstance().PlayPowerSE(7);
@@ -474,6 +482,10 @@ namespace App {
             me->SetOp(pickedItem);
             AddLog("【取得】 " + myName + " が [" + std::string(1, pickedItem) + "] を取得");
 
+            // ★ 新たに取得した場合はペナルティをリセット！
+            if (is1P) m_p1OpCostPending = false;
+            else m_p2OpCostPending = false;
+
             if (pickedItem == '+') ProceduralAudio::GetInstance().PlayPowerSE(5);
             else if (pickedItem == '-') ProceduralAudio::GetInstance().PlayPowerSE(2);
             else if (pickedItem == '*') ProceduralAudio::GetInstance().PlayPowerSE(7);
@@ -530,11 +542,8 @@ namespace App {
                 if (myOp == '/') targetMeIsBetter = true;
                 else {
                     auto calcDmg = [](int currentHp, int currentStocks, int val, int& outHp, int& outStocks) {
-                        (void)currentHp;
-
                         outHp = val;
                         outStocks = currentStocks;
-
                         if (outHp <= 0) {
                             outStocks -= 1;
                             while (outHp <= 0) {
@@ -596,11 +605,9 @@ namespace App {
                     int finalTimeMs = GetNowCount() - m_startTime;
                     int turns = m_mapGrid.GetTotalTurns();
 
-                    // ① 1Pと2Pそれぞれの戦績データを作成
                     BattleStats p1Stats = { turns, finalTimeMs, m_p1TotalMoves, m_p1TotalOps, m_p1MaxDamage };
                     BattleStats p2Stats = { turns, finalTimeMs, m_p2TotalMoves, m_p2TotalOps, m_p2MaxDamage };
 
-                    // ② 「誰が勝ったのか（1=1P, 2=2P）」を正確に判定
                     int winner = 0;
                     if (m_ruleMode == RuleMode::ZERO_ONE) {
                         Fraction goal(m_targetScore);
@@ -611,7 +618,6 @@ namespace App {
                         winner = m_is1PWinner ? 1 : 2;
                     }
 
-                    // ③ SceneManagerに渡して画面遷移！
                     auto* sm = SceneManager::GetInstance();
                     sm->SetBattleResult(winner, p1Stats, p2Stats);
                     sm->ChangeScene(SceneManager::SCENE_ID::RESULT);
@@ -654,23 +660,16 @@ namespace App {
         m_shaderTime += 0.0016f + (0.005f * m_effectIntensity);
         if (m_effectIntensity > 0.0f) m_effectIntensity -= 0.05f;
 
-        // ==========================================
-        // ★ 新規: スコアのイージング（高速カウントアップ/ダウン）
-        // ==========================================
         if (m_ruleMode == RuleMode::ZERO_ONE) {
-            // 実際の内部スコアを取得
             float target1P = (float)(m_p1ZeroOneScore.n / m_p1ZeroOneScore.d);
             float target2P = (float)(m_p2ZeroOneScore.n / m_p2ZeroOneScore.d);
 
-            // 毎フレーム15%ずつ目標値に近づく（シュバババッ！というアニメーション）
             m_p1DisplayScore += (target1P - m_p1DisplayScore) * 0.15f;
             m_p2DisplayScore += (target2P - m_p2DisplayScore) * 0.15f;
 
-            // 誤差が0.5未満になったらピタリと合わせる
             if (std::abs(target1P - m_p1DisplayScore) < 0.5f) m_p1DisplayScore = target1P;
             if (std::abs(target2P - m_p2DisplayScore) < 0.5f) m_p2DisplayScore = target2P;
         }
-        // ==========================================
 
         switch (m_currentPhase) {
         case Phase::P1_TurnStart:
@@ -685,12 +684,12 @@ namespace App {
             if (m_player) ReserveOperatorUpkeepIfNeeded(*m_player, true);
 
             if (m_is1P_NPC) {
-                if (m_aiWaitTimer > 0) m_aiWaitTimer--; // ★ AIの思考ウェイト！
+                if (m_aiWaitTimer > 0) m_aiWaitTimer--;
                 else {
                     if (!m_playerAIStarted) { ExecuteAI(m_player.get(), m_enemy.get(), true); m_playerAIStarted = true; }
                     else if (m_player && !m_player->IsMoving()) {
                         m_currentPhase = Phase::P1_Action;
-                        m_aiWaitTimer = 30; // ★ 移動後も0.5秒ウェイトを入れる
+                        m_aiWaitTimer = 30;
                     }
                 }
             }
@@ -699,7 +698,7 @@ namespace App {
 
         case Phase::P1_Action:
             if (m_is1P_NPC) {
-                if (m_aiWaitTimer > 0) m_aiWaitTimer--; // ★ AIの思考ウェイト！
+                if (m_aiWaitTimer > 0) m_aiWaitTimer--;
                 else ExecuteAIAction(m_player.get(), m_enemy.get(), true);
             }
             else HandleActionInput(*m_player, *m_enemy);
@@ -709,12 +708,12 @@ namespace App {
             if (m_enemy) ReserveOperatorUpkeepIfNeeded(*m_enemy, false);
 
             if (m_is2P_NPC) {
-                if (m_aiWaitTimer > 0) m_aiWaitTimer--; // ★ AIの思考ウェイト！
+                if (m_aiWaitTimer > 0) m_aiWaitTimer--;
                 else {
                     if (!m_enemyAIStarted) { ExecuteAI(m_enemy.get(), m_player.get(), false); m_enemyAIStarted = true; }
                     else if (m_enemy && !m_enemy->IsMoving()) {
                         m_currentPhase = Phase::P2_Action;
-                        m_aiWaitTimer = 30; // ★ 移動後も0.5秒ウェイトを入れる
+                        m_aiWaitTimer = 30;
                     }
                 }
             }
@@ -723,46 +722,38 @@ namespace App {
 
         case Phase::P2_Action:
             if (m_is2P_NPC) {
-                if (m_aiWaitTimer > 0) m_aiWaitTimer--; // ★ AIの思考ウェイト！
+                if (m_aiWaitTimer > 0) m_aiWaitTimer--;
                 else ExecuteAIAction(m_enemy.get(), m_player.get(), false);
             }
             else HandleActionInput(*m_enemy, *m_player);
             break;
         }
 
-        // ==========================================
-        // 右上のPAUSEボタンのホバー・クリック判定
-        // ==========================================
         int pauseBtnW = 160;
         int pauseBtnH = 50;
-        int pauseBtnX = SCREEN_W - pauseBtnW - 20; // 右上
+        int pauseBtnX = SCREEN_W - pauseBtnW - 20;
         int pauseBtnY = 10;
 
         if (CheckButtonClick(pauseBtnX, pauseBtnY, pauseBtnW, pauseBtnH, input.GetMousePos())) {
             static Vector2 prevM = input.GetMousePos();
             if (prevM.x != input.GetMousePos().x || prevM.y != input.GetMousePos().y) {
-                ProceduralAudio::GetInstance().PlayPowerSE(2); // ホバー音
+                ProceduralAudio::GetInstance().PlayPowerSE(2);
             }
             prevM = input.GetMousePos();
 
             if (input.IsMouseLeftTrg()) {
-                SceneManager::GetInstance()->TogglePause(); // スイッチを押す！
-                return; // 即閉じ防止のためUpdateを抜ける
+                SceneManager::GetInstance()->TogglePause();
+                return;
             }
         }
 
-        // ==========================================
-        // ★ 修正: アニメーション完了を待ってからゲームオーバー演出へ
-        // ==========================================
         bool isDisplayCaughtUp = true;
         if (m_ruleMode == RuleMode::ZERO_ONE) {
             float target1P = (float)(m_p1ZeroOneScore.n / m_p1ZeroOneScore.d);
             float target2P = (float)(m_p2ZeroOneScore.n / m_p2ZeroOneScore.d);
-            // 表示上のスコアが完全に追いついているか判定
             isDisplayCaughtUp = (m_p1DisplayScore == target1P) && (m_p2DisplayScore == target2P);
         }
 
-        // 内部で終了条件を満たし、かつ画面のアニメーションが完了していればゲームオーバー！
         if (IsGameOver() && isDisplayCaughtUp && m_currentPhase != Phase::FINISH) {
             m_currentPhase = Phase::FINISH;
             m_finishTimer = 0;
@@ -790,22 +781,21 @@ namespace App {
         if (me->HasWarpNode(bestTarget)) actualCost = 1;
 
         if (me->HasWarpNode(bestTarget)) {
-            AddLog("【跳躍】 " + myName + " がワープを起動し (" + std::to_string(bestTarget.x + 1) + "," + std::to_string(9 - bestTarget.y) + ") に移動！ (POWER -1)");
+            AddLog("【跳躍】 " + myName + " がワープを起動し (" + std::to_string(bestTarget.x + 1) + "," + std::to_string(9 - bestTarget.y) + ") に移動！");
             ProceduralAudio::GetInstance().PlayPowerSE(8);
         }
         else if (isStay) {
-            AddLog("【待機】 " + myName + " はその場で動かずパワーを消費しました。 (パワー -1)");
+            AddLog("【待機】 " + myName + " はその場で動かずパワーを消費しました。");
             ProceduralAudio::GetInstance().PlayPowerSE(1);
         }
         else {
-            AddLog("【移動】 " + myName + " が (" + std::to_string(bestTarget.x + 1) + "," + std::to_string(9 - bestTarget.y) + ") へ移動(パワー -" + std::to_string(actualCost) + ")");
+            AddLog("【移動】 " + myName + " が (" + std::to_string(bestTarget.x + 1) + "," + std::to_string(9 - bestTarget.y) + ") へ移動");
             ProceduralAudio::GetInstance().PlayPowerSE(5);
         }
 
         int dx = std::abs(bestTarget.x - myPos.x);
         int dy = std::abs(bestTarget.y - myPos.y);
-        if (is1P) m_p1TotalMoves += std::max(dx, dy);
-        else m_p2TotalMoves += std::max(dx, dy);
+        if (is1P) m_p1TotalMoves += std::max(dx, dy); else m_p2TotalMoves += std::max(dx, dy);
 
         if (me->HasWarpNode(bestTarget) || isStay || (dx != dy && dx != 0 && dy != 0)) {
             screenPath.push(m_mapGrid.GetCellCenter(bestTarget.x, bestTarget.y));
@@ -816,8 +806,7 @@ namespace App {
             IntVector2 curr = myPos;
             int maxSteps = std::max(dx, dy);
             for (int i = 0; i < maxSteps; ++i) {
-                curr.x += stepX;
-                curr.y += stepY;
+                curr.x += stepX; curr.y += stepY;
                 screenPath.push(m_mapGrid.GetCellCenter(curr.x, curr.y));
             }
         }
@@ -886,25 +875,28 @@ namespace App {
                             }
 
                             if (item == '/') {
-                                if (isClean) itemVal += 1500;
-                            }
-                            else {
-                                Fraction resF(hypRes);
-                                Fraction nextMy = myScoreNow + resF;
-                                if (nextMy > goal) nextMy = goal - (nextMy - goal);
-                                long long myDistNext = std::abs((goal - nextMy).n / (goal - nextMy).d);
-                                int benefitMe = (int)(myDistNow - myDistNext) * 200;
-                                if (nextMy == goal) benefitMe = 100000;
-
-                                Fraction nextEn = enScoreNow + resF;
-                                if (nextEn > goal) nextEn = goal - (nextEn - goal);
-                                long long enDistNext = std::abs((goal - nextEn).n / (goal - nextEn).d);
-                                int benefitEn = (int)(enDistNext - enDistNow) * 200;
-                                if (nextEn == goal) benefitEn = -100000;
-
-                                itemVal += std::max(benefitMe, benefitEn);
+                                if (isClean) {
+                                    itemVal += 1500;
+                                }
+                                else {
+                                    // ★ AI修正：割り切れない場合はスコア加算の評価をしない
+                                    if (itemVal > bestItemScore) bestItemScore = itemVal;
+                                    continue;
+                                }
                             }
 
+                            Fraction resF(hypRes);
+                            Fraction nextMy = myScoreNow + resF; if (nextMy > goal) nextMy = goal - (nextMy - goal);
+                            long long myDistNext = std::abs((goal - nextMy).n / (goal - nextMy).d);
+                            int benefitMe = (int)(myDistNow - myDistNext) * 200;
+                            if (nextMy == goal) benefitMe = 100000;
+
+                            Fraction nextEn = enScoreNow + resF; if (nextEn > goal) nextEn = goal - (nextEn - goal);
+                            long long enDistNext = std::abs((goal - nextEn).n / (goal - nextEn).d);
+                            int benefitEn = (int)(enDistNext - enDistNow) * 200;
+                            if (nextEn == goal) benefitEn = -100000;
+
+                            itemVal += std::max(benefitMe, benefitEn);
                             if (itemVal > bestItemScore) bestItemScore = itemVal;
                         }
                     }
@@ -918,26 +910,29 @@ namespace App {
 
                 if (canAttack) {
                     int eNum = enemy.GetNumber();
-                    int res = 0;
+                    int res = 0; bool isClean = true;
                     if (virtualOp == '+')      res = predictedHp + eNum;
                     else if (virtualOp == '-') res = predictedHp - eNum;
                     else if (virtualOp == '*') res = predictedHp * eNum;
-                    else if (virtualOp == '/') res = (eNum != 0 && predictedHp % eNum == 0) ? predictedHp / eNum : 0;
-                    Fraction resF(res);
+                    else if (virtualOp == '/') {
+                        if (eNum != 0 && predictedHp % eNum == 0) res = predictedHp / eNum;
+                        else isClean = false;
+                    }
 
-                    Fraction nextMy = myScoreNow + resF; if (nextMy > goal) nextMy = goal - (nextMy - goal);
-                    Fraction nextEn = enScoreNow + resF; if (nextEn > goal) nextEn = goal - (nextEn - goal);
+                    if (virtualOp != '/' || isClean) { // ★ AI修正：割り切れる時のみ加算を評価
+                        Fraction resF(res);
+                        Fraction nextMy = myScoreNow + resF; if (nextMy > goal) nextMy = goal - (nextMy - goal);
+                        Fraction nextEn = enScoreNow + resF; if (nextEn > goal) nextEn = goal - (nextEn - goal);
 
-                    long long myDistNext = std::abs((goal - nextMy).n / (goal - nextMy).d);
-                    long long enDistNext = std::abs((goal - nextEn).n / (goal - nextEn).d);
+                        long long myDistNext = std::abs((goal - nextMy).n / (goal - nextMy).d);
+                        long long enDistNext = std::abs((goal - nextEn).n / (goal - nextEn).d);
 
-                    int gainMe = (int)(myDistNow - myDistNext) * 200;
-                    if (nextMy == goal) gainMe = 1000000;
+                        int gainMe = (int)(myDistNow - myDistNext) * 200; if (nextMy == goal) gainMe = 1000000;
+                        int gainEn = (int)(enDistNext - enDistNow) * 200; if (nextEn == goal) gainEn = -1000000;
 
-                    int gainEn = (int)(enDistNext - enDistNow) * 200;
-                    if (nextEn == goal) gainEn = -1000000;
-
-                    score += std::max(gainMe, gainEn);
+                        score += std::max(gainMe, gainEn);
+                    }
+                    if (virtualOp == '/' && isClean) score += 2000;
                 }
             }
             if (canAttack && virtualOp == '\0' && enemy.GetOp() != '\0') score -= 5000;
@@ -957,7 +952,6 @@ namespace App {
                             int itemVal = (20 - distToItem) * 500;
                             if (item == '-') itemVal += 5000;
                             else if (item == '*') itemVal += 3000;
-
                             if (predictedStocks == 0 && predictedHp <= 3 && item == '+') itemVal += 8000;
 
                             if (itemVal > bestItemScore) bestItemScore = itemVal;
@@ -982,42 +976,31 @@ namespace App {
                         else isClean = false;
                     }
 
-                    if (virtualOp == '/') {
-                        if (isClean) score += 2000; else score -= 1000;
-                    }
-                    else {
-                        auto calcDmg = [](int currentHp, int currentStocks, int val, int& outHp, int& outStocks) {
-                            (void)currentHp;
+                    auto calcDmg = [](int currentHp, int currentStocks, int val, int& outHp, int& outStocks) {
+                        outHp = val; outStocks = currentStocks;
+                        if (outHp <= 0) { outStocks -= 1; while (outHp <= 0) outHp += 9; }
+                        else if (outHp > 9) { outStocks += 1; while (outHp > 9) outHp -= 9; }
+                        };
 
-                            outHp = val;
-                            outStocks = currentStocks;
+                    int myHpNext = predictedHp, myStNext = predictedStocks, enHpNext = eNum, enStNext = enemy.GetStocks();
 
-                            if (outHp <= 0) {
-                                outStocks -= 1;
-                                while (outHp <= 0) {
-                                    outHp += 9;
-                                }
-                            }
-                            else if (outHp > 9) {
-                                outStocks += 1;
-                                while (outHp > 9) {
-                                    outHp -= 9;
-                                }
-                            }
-                            };
-
-                        int myHpNext, myStNext, enHpNext, enStNext;
+                    // ★ AI修正：割り切れない場合はダメージが発生しないので計算しない
+                    if (virtualOp != '/' || isClean) {
                         calcDmg(predictedHp, predictedStocks, intRes, myHpNext, myStNext);
                         calcDmg(eNum, enemy.GetStocks(), intRes, enHpNext, enStNext);
-
-                        int scoreMe = (myStNext - predictedStocks) * 10000 + (myHpNext - predictedHp) * 1000;
-                        if (myStNext <= 0 && myHpNext <= 0) scoreMe -= 5000000;
-
-                        int scoreEn = (enemy.GetStocks() - enStNext) * 15000 + (eNum - enHpNext) * 500;
-                        if (enStNext <= 0 && enHpNext <= 0) scoreEn += 10000000;
-
-                        score += std::max(scoreMe, scoreEn);
                     }
+
+                    int scoreMe = (myStNext - predictedStocks) * 10000 + (myHpNext - predictedHp) * 1000;
+                    if (myStNext <= 0 && myHpNext <= 0) scoreMe -= 5000000;
+
+                    int scoreEn = (enemy.GetStocks() - enStNext) * 15000 + (eNum - enHpNext) * 500;
+                    if (enStNext <= 0 && enHpNext <= 0) scoreEn += 10000000;
+
+                    if (virtualOp == '/') {
+                        if (isClean) score += 2000;
+                        else score -= 1000;
+                    }
+                    score += std::max(scoreMe, scoreEn);
                 }
             }
             if (canAttack && virtualOp == '\0' && enemy.GetOp() != '\0') score -= 5000;
@@ -1082,10 +1065,8 @@ namespace App {
         m_effectIntensity = 2.0f;
 
         if (aOp == '/' && dNum != 0) {
-            int wx = aNum - 1;
-            int wy = 9 - dNum;
+            int wx = aNum - 1, wy = 9 - dNum;
             IntVector2 nodePos{ wx, wy };
-
             if (!target.HasWarpNode(nodePos)) {
                 target.AddWarpNode(nodePos);
                 std::string targetName = (&target == m_player.get()) ? "1P" : "2P";
@@ -1107,15 +1088,10 @@ namespace App {
                 resFrac = Fraction(intRes);
             }
             else {
-                intRes = 0;
-                resFrac = Fraction(0);
-                isCleanDivide = false;
+                intRes = 0; resFrac = Fraction(0); isCleanDivide = false;
             }
         }
 
-        // ==========================================
-         // 計算式のログ出力(ExecuteBattle内)
-         // ==========================================
         std::string aName = (&attacker == m_player.get()) ? "1P" : "2P";
 
         if (aOp != '/') {
@@ -1124,6 +1100,13 @@ namespace App {
             ProceduralAudio::GetInstance().PlayPowerSE(4);
         }
         else {
+            if (isCleanDivide) {
+                std::string eqStr = std::to_string(aNum) + " / " + std::to_string(dNum) + " = " + std::to_string(intRes);
+                AddLog("【計算】 " + aName + " が計算を実行！ [ " + eqStr + " ] (割り切れた！)");
+            }
+            else {
+                AddLog("【計算】 " + aName + " が割り算を実行！ (割り切れなかった…)");
+            }
             ProceduralAudio::GetInstance().PlayPowerSE(4);
         }
 
@@ -1137,27 +1120,23 @@ namespace App {
             if (std::abs(intRes) > m_p2MaxDamage) m_p2MaxDamage = std::abs(intRes);
         }
 
-        ApplyBattleResult(target, resFrac, intRes, aOp);
+        // ★ 修正：isCleanDivide を渡して割り切れたかどうかの判定を正確に行う
+        ApplyBattleResult(target, resFrac, intRes, aOp, isCleanDivide);
         attacker.SetOp('\0');
 
         AddLog("----------------------------------------");
     }
 
     // ==========================================
-    // 反映結果のログ出力
+    // ★ 完璧に修正されたダメージ＆スコア反映ロジック
     // ==========================================
-    void BattleMaster::ApplyBattleResult(UnitBase& unit, const Fraction& resultFrac, int intRes, char op) {
-        (void)resultFrac; // カウントルール用（ノーマルバトルでは未使用の警告除け）
+    void BattleMaster::ApplyBattleResult(UnitBase& unit, const Fraction& resultFrac, int intRes, char op, bool isCleanDivide) {
         std::string targetName = (&unit == m_player.get()) ? "1P" : "2P";
 
         if (m_ruleMode == RuleMode::ZERO_ONE) {
-            // ==========================================
-            // カウントバトルの処理（スコア制）
-            // ==========================================
-            Fraction& currentScore = (&unit == m_player.get()) ? m_p1ZeroOneScore : m_p2ZeroOneScore;
-            Fraction goalScore(m_targetScore);
-
-            if (op != '/') {
+            if (op != '/' || isCleanDivide) {
+                Fraction& currentScore = (&unit == m_player.get()) ? m_p1ZeroOneScore : m_p2ZeroOneScore;
+                Fraction goalScore(m_targetScore);
                 Fraction predictedScore = currentScore + resultFrac;
                 std::string prevScoreStr = currentScore.ToString();
 
@@ -1176,41 +1155,29 @@ namespace App {
                     currentScore = predictedScore;
                     AddLog("【反映】 " + targetName + " のスコアに適用！ [" + prevScoreStr + " -> " + currentScore.ToString() + "]");
                 }
+
+                int cycleValue = (intRes - 1) % 9;
+                if (cycleValue < 0) cycleValue += 9;
+                int finalNum = cycleValue + 1;
+
+                AddLog("【設定】 " + targetName + " のパワーが [" + std::to_string(finalNum) + "] に再設定されました。");
+                unit.SetNumber(finalNum);
+                ProceduralAudio::GetInstance().PlayPowerSE(finalNum);
             }
             else {
-                AddLog("【反映】 割り算のためスコア加算はスキップされました。");
+                AddLog("【反映】 割り切れなかったため、スコアの加算とパワーの変動はスキップされました。");
             }
-
-            int cycleValue = (intRes - 1) % 9;
-            if (cycleValue < 0) cycleValue += 9;
-            int finalNum = cycleValue + 1;
-
-            AddLog("【反映】 " + targetName + " のパワーが [" + std::to_string(finalNum) + "] に再設定されました。");
-            unit.SetNumber(finalNum);
-            ProceduralAudio::GetInstance().PlayPowerSE(finalNum);
         }
-        else {
-            // ==========================================
-            // ノーマルバトルの処理（完全書き換え式）
-            // ==========================================
-            if (op != '/') {
-                int newPower = intRes; // 現在のパワーは無視して、計算結果で上書き
+        else { // CLASSIC
+            if (op != '/' || isCleanDivide) {
+                int newPower = intRes;
                 int stockChange = 0;
 
-                // 橋本さんのロジック「18 = バッテリー2・パワー0 -> バッテリー1・パワー9」を
-                // whileループで正確にシミュレート（繰り上がり・繰り下がり処理）
-                while (newPower <= 0) {
-                    stockChange--;
-                    newPower += 9;
-                }
-                while (newPower > 9) {
-                    stockChange++;
-                    newPower -= 9;
-                }
+                while (newPower <= 0) { stockChange--; newPower += 9; }
+                while (newPower > 9) { stockChange++; newPower -= 9; }
 
-                // 3. バッテリーの増減と死亡判定
                 if (stockChange < 0) {
-                    // ★即死判定：現在のストック数より、マイナスされる量の方が多ければ死亡
+                    // ★即死判定
                     if (unit.GetStocks() + stockChange < 0) {
                         SetClassicDefeat(unit, "エネルギー枯渇");
                         ProceduralAudio::GetInstance().PlayErrorSE();
@@ -1229,18 +1196,18 @@ namespace App {
                     AddLog("【適用】 " + targetName + " の数値を書き換え");
                 }
 
-                // 計算された最終的なパワー（1〜9）をセット
                 unit.SetNumber(newPower);
-
                 AddLog("【着地】 " + targetName + " のパワーは [" + std::to_string(newPower) + "] に変更されました");
                 ProceduralAudio::GetInstance().PlayPowerSE(newPower);
             }
+            else {
+                AddLog("【反映】 割り切れなかったため、ダメージ処理はスキップされました。");
+            }
         }
     }
+
     void BattleMaster::Draw() const {
-        if (m_ui) {
-            m_ui->Draw(*this);
-        }
+        if (m_ui) m_ui->Draw(*this);
     }
 
     bool BattleMaster::IsGameOver() const {
@@ -1257,10 +1224,8 @@ namespace App {
 
     bool BattleMaster::IsPlayerWin() const {
         if (!m_player || !m_enemy) return false;
-
         bool is1PWin = false;
 
-        // まず「1Pが勝ったのかどうか」を判定
         if (m_ruleMode == RuleMode::ZERO_ONE) {
             Fraction goal(m_targetScore);
             is1PWin = (m_p1ZeroOneScore == goal);
@@ -1269,52 +1234,38 @@ namespace App {
             is1PWin = m_is1PWinner;
         }
 
-        // 通信対戦中の場合、自分がクライアント(2P)なら勝敗を反転させる！
         bool isOnline = (NetworkManager::GetInstance() != nullptr && NetworkManager::GetInstance()->GetState() == NetworkManager::State::CONNECTED);
         if (isOnline) {
             bool isHost = NetworkManager::GetInstance()->IsHost();
-            if (!isHost) {
-                // 自分が2Pなら、1Pが勝った＝自分の負け(!is1PWin)
-                return !is1PWin;
-            }
+            if (!isHost) return !is1PWin;
         }
-
         return is1PWin;
-    }    bool BattleMaster::CheckButtonClick(int x, int y, int w, int h, const Vector2& mousePos) const {
+    }
+
+    bool BattleMaster::CheckButtonClick(int x, int y, int w, int h, const Vector2& mousePos) const {
         return (mousePos.x >= static_cast<float>(x) && mousePos.x <= static_cast<float>(x + w) &&
             mousePos.y >= static_cast<float>(y) && mousePos.y <= static_cast<float>(y + h));
     }
 
     void BattleMaster::AddPowerWithBattery(UnitBase& unit, int delta, const std::string& reason) {
         std::string targetName = (&unit == m_player.get()) ? "1P" : "2P";
-
         int rawPower = unit.GetNumber() + delta;
 
         if (rawPower <= 0) {
-            // ★ここが重要：バッテリー0なら、9に戻さず敗北確定
             if (unit.GetStocks() <= 0) {
                 SetClassicDefeat(unit, reason);
                 return;
             }
-
             unit.AddStocks(-1);
-
-            while (rawPower <= 0) {
-                rawPower += 9;
-            }
-
+            while (rawPower <= 0) rawPower += 9;
             AddLog("【消費】 " + targetName + " は " + reason + " によりバッテリーを 1 消費！");
         }
         else if (rawPower > 9) {
             unit.AddStocks(1);
-
-            while (rawPower > 9) {
-                rawPower -= 9;
-            }
-
+            while (rawPower > 9) rawPower -= 9;
             AddLog("【充電】 " + targetName + " は " + reason + " によりバッテリーを 1 回復！");
         }
-
         unit.SetNumber(rawPower);
     }
+
 } // namespace App

@@ -2,17 +2,17 @@
 #include <memory>
 #include <queue>
 #include <string>
+#include <unordered_map>
 #include "../Common/Vector2.h"
 #include "../Object/Map/MapGrid.h"
 #include "../Object/Unit/Enemy/Enemy.h"
 #include "../Object/Unit/Player/Player.h"
 #include "../Battle/BattleUI.h"
 
-
 namespace App {
 
     class TutorialMaster {
-        friend class BattleUI; // BattleUIからの描画アクセス許可
+        friend class BattleUI;
 
     public:
         TutorialMaster();
@@ -24,42 +24,63 @@ namespace App {
         void Release();
 
         MapGrid m_mapGrid;
-
         std::unique_ptr<Player> m_player;
         std::unique_ptr<Enemy> m_enemy;
         std::unique_ptr<BattleUI> m_ui;
 
+        // ==========================================
+        // ★追加：BattleUI がカウントバトルを描画するための変数
+        // ==========================================
+        int m_ruleMode = 0; // 0: CLASSIC, 1: ZERO_ONE
+        int m_targetScore = 53;
+        int m_p1Score = 0;
+        int m_p2Score = 0;
+        float m_p1DisplayScore = 0.0f;
+        float m_p2DisplayScore = 0.0f;
+
     private:
-        // ==========================================
-        // チュートリアルの進行状態（基本操作に特化）
-        // ==========================================
         enum class Step {
-            Msg_Welcome,
-            Msg_WinLoseRule,
-            Msg_MoveRule,
-            Wait_Move1,
-            Msg_NumberChanged, // ★追加：移動で数字が変わることを教える！
-            Msg_OpRule,
-            Wait_Move2,
-            Msg_BattleRule,
-            Wait_Move3,
-            Wait_ApplyDamage,
-            Msg_Finish
+            Menu,
+
+            // 1. 基礎
+            Basic_Welcome, Basic_Wait_Move1, Basic_Res_Move1, Basic_Wait_Move2, Basic_Res_Move2, Basic_Wait_Move3, Basic_End,
+
+            // 2. 実践①
+            B1_Welcome, B1_Plus_Wait, B1_Plus_Atk, B1_Plus_Apply, B1_Plus_Res,
+            B1_Minus_Setup, B1_Minus_Wait, B1_Minus_Atk, B1_Minus_Apply, B1_Minus_Res,
+            B1_Mul_Setup, B1_Mul_Wait, B1_Mul_Atk, B1_Mul_Apply, B1_End,
+
+            // 3. 実践②
+            B2_Welcome, B2_Div_Wait, B2_Div_Atk, B2_Div_Apply, B2_Res, B2_End,
+
+            // 4. ルール①
+            RuleN_Welcome, RuleN_Wait, RuleN_Atk, RuleN_Apply, RuleN_End,
+
+            // 5. ルール②
+            RuleC_Welcome, RuleC_Wait, RuleC_Atk, RuleC_Apply, RuleC_End
         };
 
         Step m_currentStep;
         int m_stepTimer;
-
-        IntVector2 m_hoverGrid;
-
+        int m_menuCursor;
         int m_fontMsg;
 
-        // 目標マス（基本の3ステップのみ）
+        IntVector2 m_hoverGrid;
         IntVector2 m_targetMove1;
         IntVector2 m_targetMove2;
         IntVector2 m_targetMove3;
 
         void NextStep();
+        void StartTutorial(int index);
+        void SetupSituation(int sitId);
+
+        bool CheckButtonClick(int x, int y, int w, int h) const;
+        int GetCachedFont(int size) const;
+        void DrawCyberButton(int x, int y, int w, int h, const char* text, unsigned int col, bool isHover, int fontHandle) const;
+        void DrawButtonHighlight(int x, int y, int w, int h, unsigned int col) const;
+        void DrawFakeCalcPanel(int aNum, char op, int dNum, int res, bool isDiv, bool guideSelf, bool isCountMode = false) const;
+
+        void DrawMenu() const;
         void DrawMessageWindow(const std::string& text) const;
         void DrawHighlightGrid(const IntVector2& gridPos, unsigned int color) const;
     };
