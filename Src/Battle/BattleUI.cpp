@@ -730,7 +730,7 @@ namespace App {
         // ==========================================
         int f22 = GetCachedFont(22), f20 = GetCachedFont(20);
         DrawCyberPanel(40, LOG_PANEL_Y, 500, 200, COL_PANEL_BG(), GetColor(100, 100, 120), 150);
-        DrawStringToHandle(55, LOG_PANEL_Y + 10, "■ ACTION LOG", COL_DISABLE(), f22);
+        DrawStringToHandle(55, LOG_PANEL_Y + 10, "■ 戦況ログ", COL_DISABLE(), f22);
         DrawLine(50, LOG_PANEL_Y + 35, 530, LOG_PANEL_Y + 35, GetColor(60, 60, 70), 1);
 
         int maxLogOffset = std::max(0, (int)m_actionLog.size() - 6);
@@ -749,7 +749,7 @@ namespace App {
 
         // 基本ルールパネル
         DrawCyberPanel(1380, LOG_PANEL_Y, 500, 200, COL_PANEL_BG(), GetColor(100, 100, 120), 150);
-        DrawStringToHandle(1395, LOG_PANEL_Y + 10, "■ BASIC RULES", COL_DISABLE(), f22);
+        DrawStringToHandle(1395, LOG_PANEL_Y + 10, "■ 基本ルール", COL_DISABLE(), f22);
         DrawLine(1390, LOG_PANEL_Y + 35, 1870, LOG_PANEL_Y + 35, GetColor(60, 60, 70), 1);
         DrawStringToHandle(1395, LOG_PANEL_Y + 45, "パワー [1, 4, 7] : 3マス移動 (十字)", GetColor(255, 200, 100), f20);
         DrawStringToHandle(1395, LOG_PANEL_Y + 75, "パワー [2, 5, 8] : 2マス移動 (斜め)", GetColor(180, 180, 180), f20);
@@ -960,13 +960,13 @@ namespace App {
             SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
 
             int f160 = GetCachedFont(160);
-            const char* finishText = "GAME OVER";
+            const char* finishText = "ゲームセット";
             int textW = GetDrawStringWidthToHandle(finishText, (int)strlen(finishText), f160);
             DrawStringToHandle(SCREEN_W / 2 - textW / 2, SCREEN_H / 2 - 100, finishText, COL_TEXT_MAIN(), f160);
 
             if (master.m_finishTimer > 30) {
                 int f40 = GetCachedFont(40);
-                const char* nextText = ">> CLICK TO RETURN <<";
+                const char* nextText = ">> クリックで進む <<";
                 int nw = GetDrawStringWidthToHandle(nextText, (int)strlen(nextText), f40);
                 DrawStringToHandle(SCREEN_W / 2 - nw / 2, SCREEN_H / 2 + 100, nextText, COL_TEXT_SUB(), f40);
             }
@@ -1098,7 +1098,7 @@ namespace App {
 
         int f22 = GetCachedFont(22), f20 = GetCachedFont(20);
         DrawCyberPanel(40, LOG_PANEL_Y, 500, 200, COL_PANEL_BG(), GetColor(100, 100, 120), 150);
-        DrawStringToHandle(55, LOG_PANEL_Y + 10, "■ ACTION LOG", COL_DISABLE(), f22);
+        DrawStringToHandle(55, LOG_PANEL_Y + 10, "■ 戦況ログ", COL_DISABLE(), f22);
         DrawLine(50, LOG_PANEL_Y + 35, 530, LOG_PANEL_Y + 35, GetColor(60, 60, 70), 1);
 
         int maxLogOffset = std::max(0, (int)m_actionLog.size() - 6);
