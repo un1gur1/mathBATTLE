@@ -148,6 +148,8 @@ namespace App {
     void BattleMaster::FinishActionPhase(bool is1P) {
         ApplyOperatorUpkeepCost(is1P);
 
+        if (IsGameOver()) return;
+
         if (!is1P) {
             m_mapGrid.UpdateTurn();
         }

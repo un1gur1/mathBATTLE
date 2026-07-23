@@ -401,18 +401,30 @@ namespace App {
         if (master.m_enemy)  master.m_enemy->Draw();
 
         // 4. ヘッダー描画
-        unsigned int phaseCol;
-        const char* phaseName;
-        if (master.m_currentPhase == BattleMaster::Phase::P1_Move) { phaseCol = GetColor(180, 110, 0); phaseName = master.m_is1P_NPC ? "1Pのターン (思考中)" : "1Pのターン (移動選択)"; }
-        else if (master.m_currentPhase == BattleMaster::Phase::P1_Action) { phaseCol = GetColor(180, 110, 0); phaseName = master.m_is1P_NPC ? "1Pのターン (思考中)" : "1Pのターン (行動選択)"; }
-        else if (master.m_currentPhase == BattleMaster::Phase::P2_Move) { phaseCol = GetColor(30, 50, 120); phaseName = master.m_is2P_NPC ? "2Pのターン (思考中)" : "2Pのターン (移動選択)"; }
-        else if (master.m_currentPhase == BattleMaster::Phase::P2_Action) { phaseCol = GetColor(30, 50, 120); phaseName = master.m_is2P_NPC ? "2Pのターン (思考中)" : "2Pのターン (行動選択)"; }
-        else { phaseCol = COL_INFO(); phaseName = "終了！！"; }
+        unsigned int phaseCol = COL_INFO();
+        const char* phaseName = "終了！！";
+
+        // 勝敗が決まっていなければ、現在のフェーズに合わせて名前を変える
+        if (!master.IsGameOver() && master.m_currentPhase != BattleMaster::Phase::FINISH) {
+            if (master.m_currentPhase == BattleMaster::Phase::P1_TurnStart || master.m_currentPhase == BattleMaster::Phase::P1_Move) {
+                phaseCol = GetColor(180, 110, 0); phaseName = master.m_is1P_NPC ? "1Pのターン (思考中)" : "1Pのターン (移動選択)";
+            }
+            else if (master.m_currentPhase == BattleMaster::Phase::P1_Action) {
+                phaseCol = GetColor(180, 110, 0); phaseName = master.m_is1P_NPC ? "1Pのターン (思考中)" : "1Pのターン (行動選択)";
+            }
+            else if (master.m_currentPhase == BattleMaster::Phase::P2_TurnStart || master.m_currentPhase == BattleMaster::Phase::P2_Move) {
+                phaseCol = GetColor(30, 50, 120); phaseName = master.m_is2P_NPC ? "2Pのターン (思考中)" : "2Pのターン (移動選択)";
+            }
+            else if (master.m_currentPhase == BattleMaster::Phase::P2_Action) {
+                phaseCol = GetColor(30, 50, 120); phaseName = master.m_is2P_NPC ? "2Pのターン (思考中)" : "2Pのターン (行動選択)";
+            }
+        }
 
         DrawBox(0, 0, SCREEN_W, HEADER_H, phaseCol, TRUE);
         DrawLine(0, HEADER_H, SCREEN_W, HEADER_H, COL_TEXT_MAIN(), 2);
         DrawFormatStringToHandle(40, 16, COL_TEXT_MAIN(), GetCachedFont(38), ">>> %s", phaseName);
         DrawFormatStringToHandle(800, 24, COL_TEXT_SUB(), GetCachedFont(24), "経過ターン: %d", master.m_mapGrid.GetTotalTurns());
+
 
         // ==========================================
         // 事前計算（プレビュー用）
@@ -907,7 +919,7 @@ namespace App {
         // ==========================================
         // ターン開始カットイン
         // ==========================================
-        if (master.m_currentPhase == BattleMaster::Phase::P1_TurnStart || master.m_currentPhase == BattleMaster::Phase::P2_TurnStart) {
+        if (!master.IsGameOver() && (master.m_currentPhase == BattleMaster::Phase::P1_TurnStart || master.m_currentPhase == BattleMaster::Phase::P2_TurnStart)) {
             bool is1P = (master.m_currentPhase == BattleMaster::Phase::P1_TurnStart);
             int timer = master.GetTurnStartTimer();
 
