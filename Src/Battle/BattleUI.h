@@ -31,8 +31,7 @@ namespace App {
         void AddLog(const std::string& message);
         void ScrollLog(int wheelDelta, float mouseX, float mouseY);
 
-
-        // フォント取得
+        // フォント取得（cppにあったものをこっちで管理）
         static int GetCachedFont(int size);
     private:
         void DrawEnemyDangerArea(const BattleMaster& master) const;
