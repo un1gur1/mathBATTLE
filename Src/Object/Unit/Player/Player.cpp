@@ -3,8 +3,7 @@
 #include <DxLib.h>
 #include <cmath>
 #include <string>
-#include <unordered_map> // ★追加
-
+#include <unordered_map> 
 #include "../../../Shader/CrystalOrbShader.h" 
 
 namespace App {
@@ -28,36 +27,57 @@ namespace App {
     }
 
     void DrawHexagonAA(float cx, float cy, float radius, unsigned int color, bool fill, float thickness = 1.0f, float rotAngle = 0.0f) {
+
+        //六分割したときの角度をそれぞれ配列に格納している
         float angleOffsets[6] = { 0.0f, 60.0f, 120.0f, 180.0f, 240.0f, 300.0f };
+        //デグリー(度数法)をラジアン(弧度法)に変更している
         float rad = 3.14159265f / 180.0f;
 
+        //判定処理速度を上げるために判定式の外でラジアンの計算をまとめてせずに先に判定をしてその中でラジアンの計算をしている
+		// これによって毎度fillの判定をする必要がなくなり、処理速度が上がる
+        
+		//引数のfillがtrueだったら塗りつぶす処理、falseだったら枠線だけを描画する処理
         if (fill) {
+            //一つ目の点から二つ目の点と中心点を結んで三角形をを描画する処理を繰り返すことで六角形を描画している
             for (int i = 0; i < 6; ++i) {
+				//一つ目の点の初期座標をラジアンで計算している
                 float a1 = angleOffsets[i] * rad + rotAngle;
+                //次の点の初期座標をラジアンで計算している
                 float a2 = angleOffsets[(i + 1) % 6] * rad + rotAngle;
+                //一つ目の引数は中心点の座標xyで、二つ目の引数は一つ目の点の座標xy,三つめは次の点の座標xy、であとはいろと塗りつぶすかどうかの判定をして描画している
                 DrawTriangleAA(cx, cy, cx + cos(a1) * radius, cy + sin(a1) * radius, cx + cos(a2) * radius, cy + sin(a2) * radius, color, TRUE);
             }
         }
+		//引数のfillがfalseだったら枠線だけを描画する処理
         else {
+            //とりあえず六回回している
             for (int i = 0; i < 6; ++i) {
+                //ここは枠線だけだから一つ目と二つ目の点をラジアンで計算している
                 float a1 = angleOffsets[i] * rad + rotAngle;
                 float a2 = angleOffsets[(i + 1) % 6] * rad + rotAngle;
+                //点と点を結んでいる。
                 DrawLineAA(cx + cos(a1) * radius, cy + sin(a1) * radius, cx + cos(a2) * radius, cy + sin(a2) * radius, color, thickness);
             }
         }
     }
 
     void Player::DrawUnitGraphic() {
+        //double型でtimeを定義して、GetNowCount()は現在の時間をミリ単位で返す関数なので、1000でわって秒に変換している
         double time = GetNowCount() / 1000.0;
+        //ここで揺れの幅をsin関数で計算している。sin関数は-1から1の間でへんかするので三倍の速さで動かしてその揺れの幅を四倍にしている
         float bobbing = (float)(sin(time * 3.0) * 4.0);
-
+		//描画位置をメンバ変数で定義しているm_screenPosからxとyを取得している
         float x = m_screenPos.x;
         float y = m_screenPos.y;
+		//縦に揺れるようにbobbingを足している
         float unitY = y + bobbing;
 
         // 1. シャドウ
+        //アルファブレンドモードで透明度を設定していて、bobbingに対応して浮遊時の遠近感を影の大きさで表現している
         SetDrawBlendMode(DX_BLENDMODE_ALPHA, (int)(80 - (bobbing + 4.0f) * 5.0f));
+        //物体の中心から下にずらして陰にしていて、bobbingに対応して縦横のサイズが変わるようにしている
         DrawOvalAA(x, y + 32.0f, 24.0f - bobbing / 2.0f, 8.0f - bobbing / 4.0f, 64, GetColor(0, 50, 100), TRUE);
+        //元に戻す
         SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
 
         // 2. アウター・ヘックスシールド
