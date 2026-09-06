@@ -95,6 +95,7 @@ namespace App {
     bool BattleMaster::Is1PTurn() const {
         return (m_currentPhase == Phase::P1_TurnStart || m_currentPhase == Phase::P1_Move || m_currentPhase == Phase::P1_Action);
     }
+
     UnitBase* BattleMaster::GetActiveUnit()const {
         return Is1PTurn() ? static_cast<UnitBase*>(m_player.get()) : static_cast<UnitBase*>(m_enemy.get());
     }
@@ -120,9 +121,6 @@ namespace App {
             ": 演算子負荷を検知。ターン終了時に保持中ならバッテリーが 1 減少します。");
     }
 
-    // ==========================================
-    // ★修正：演算子保持によるバッテリー消費（死亡判定付き）
-    // ==========================================
     void BattleMaster::ApplyOperatorUpkeepCost(bool is1P) {
         if (m_ruleMode != RuleMode::CLASSIC) return;
 
@@ -164,6 +162,23 @@ namespace App {
         m_gameMode = (sm->GetPlayerCount() == 1) ? GameMode::VS_CPU : GameMode::VS_PLAYER;
         m_ruleMode = (sm->GetGameMode() == 0) ? RuleMode::CLASSIC : RuleMode::ZERO_ONE;
 
+        // ★ 完全修正版：OFFLINE以外ならオンライン対戦とみなす ★
+        // （Initの時点では接続待機中のためCONNECTEDにならないことを考慮）
+        bool isOnline = false;
+        if (NetworkManager::GetInstance() != nullptr) {
+            if (NetworkManager::GetInstance()->GetState() != NetworkManager::State::OFFLINE) {
+                isOnline = true;
+            }
+        }
+
+        m_is1P_NPC = sm->Is1PNPC();
+        m_is2P_NPC = sm->Is2PNPC();
+
+        if (isOnline) {
+            m_is1P_NPC = false;
+            m_is2P_NPC = false;
+        }
+
         int maxStocks = sm->GetMaxStocks();
         m_targetScore = sm->GetZeroOneScore();
         m_p1ZeroOneScore = Fraction(0, 1);
@@ -172,8 +187,6 @@ namespace App {
         m_p1DisplayScore = 0.0f;
         m_p2DisplayScore = 0.0f;
 
-        m_is1P_NPC = sm->Is1PNPC();
-        m_is2P_NPC = sm->Is2PNPC();
         IntVector2 p1StartPos{ sm->Get1PStartX(), sm->Get1PStartY() };
         IntVector2 p2StartPos{ sm->Get2PStartX(), sm->Get2PStartY() };
 
@@ -268,7 +281,8 @@ namespace App {
         bool isClick = false;
         Vector2 mousePos;
 
-        bool isOnline = (NetworkManager::GetInstance() != nullptr && NetworkManager::GetInstance()->GetState() == NetworkManager::State::CONNECTED);
+        // ★ 判定条件をOFFLINE以外で統一
+        bool isOnline = (NetworkManager::GetInstance() != nullptr && NetworkManager::GetInstance()->GetState() != NetworkManager::State::OFFLINE);
         bool isMyTurn = true;
         if (isOnline) {
             bool isHost = NetworkManager::GetInstance()->IsHost();
@@ -381,7 +395,6 @@ namespace App {
             std::string name = is1P ? "1P" : "2P";
             AddLog("【取得】 " + name + "が [" + std::string(1, pickedItem) + "] を取得！");
 
-            // ★ 新たに取得した場合はペナルティをリセット！
             if (is1P) m_p1OpCostPending = false;
             else m_p2OpCostPending = false;
 
@@ -404,7 +417,8 @@ namespace App {
         bool isClick = false;
         Vector2 mousePos;
 
-        bool isOnline = (NetworkManager::GetInstance() != nullptr && NetworkManager::GetInstance()->GetState() == NetworkManager::State::CONNECTED);
+        // ★ 判定条件をOFFLINE以外で統一
+        bool isOnline = (NetworkManager::GetInstance() != nullptr && NetworkManager::GetInstance()->GetState() != NetworkManager::State::OFFLINE);
         bool isMyTurn = true;
         if (isOnline) {
             bool isHost = NetworkManager::GetInstance()->IsHost();
@@ -484,7 +498,6 @@ namespace App {
             me->SetOp(pickedItem);
             AddLog("【取得】 " + myName + " が [" + std::string(1, pickedItem) + "] を取得");
 
-            // ★ 新たに取得した場合はペナルティをリセット！
             if (is1P) m_p1OpCostPending = false;
             else m_p2OpCostPending = false;
 
@@ -881,7 +894,6 @@ namespace App {
                                     itemVal += 1500;
                                 }
                                 else {
-                                    // ★ AI修正：割り切れない場合はスコア加算の評価をしない
                                     if (itemVal > bestItemScore) bestItemScore = itemVal;
                                     continue;
                                 }
@@ -921,7 +933,7 @@ namespace App {
                         else isClean = false;
                     }
 
-                    if (virtualOp != '/' || isClean) { // ★ AI修正：割り切れる時のみ加算を評価
+                    if (virtualOp != '/' || isClean) {
                         Fraction resF(res);
                         Fraction nextMy = myScoreNow + resF; if (nextMy > goal) nextMy = goal - (nextMy - goal);
                         Fraction nextEn = enScoreNow + resF; if (nextEn > goal) nextEn = goal - (nextEn - goal);
@@ -954,6 +966,7 @@ namespace App {
                             int itemVal = (20 - distToItem) * 500;
                             if (item == '-') itemVal += 5000;
                             else if (item == '*') itemVal += 3000;
+
                             if (predictedStocks == 0 && predictedHp <= 3 && item == '+') itemVal += 8000;
 
                             if (itemVal > bestItemScore) bestItemScore = itemVal;
@@ -978,31 +991,29 @@ namespace App {
                         else isClean = false;
                     }
 
-                    auto calcDmg = [](int currentHp, int currentStocks, int val, int& outHp, int& outStocks) {
-                        outHp = val; outStocks = currentStocks;
-                        if (outHp <= 0) { outStocks -= 1; while (outHp <= 0) outHp += 9; }
-                        else if (outHp > 9) { outStocks += 1; while (outHp > 9) outHp -= 9; }
-                        };
-
-                    int myHpNext = predictedHp, myStNext = predictedStocks, enHpNext = eNum, enStNext = enemy.GetStocks();
-
-                    // ★ AI修正：割り切れない場合はダメージが発生しないので計算しない
-                    if (virtualOp != '/' || isClean) {
-                        calcDmg(predictedHp, predictedStocks, intRes, myHpNext, myStNext);
-                        calcDmg(eNum, enemy.GetStocks(), intRes, enHpNext, enStNext);
-                    }
-
-                    int scoreMe = (myStNext - predictedStocks) * 10000 + (myHpNext - predictedHp) * 1000;
-                    if (myStNext <= 0 && myHpNext <= 0) scoreMe -= 5000000;
-
-                    int scoreEn = (enemy.GetStocks() - enStNext) * 15000 + (eNum - enHpNext) * 500;
-                    if (enStNext <= 0 && enHpNext <= 0) scoreEn += 10000000;
-
                     if (virtualOp == '/') {
                         if (isClean) score += 2000;
                         else score -= 1000;
                     }
-                    score += std::max(scoreMe, scoreEn);
+                    else {
+                        auto calcDmg = [](int currentHp, int currentStocks, int val, int& outHp, int& outStocks) {
+                            outHp = val; outStocks = currentStocks;
+                            if (outHp <= 0) { outStocks -= 1; while (outHp <= 0) outHp += 9; }
+                            else if (outHp > 9) { outStocks += 1; while (outHp > 9) outHp -= 9; }
+                            };
+
+                        int myHpNext, myStNext, enHpNext, enStNext;
+                        calcDmg(predictedHp, predictedStocks, intRes, myHpNext, myStNext);
+                        calcDmg(eNum, enemy.GetStocks(), intRes, enHpNext, enStNext);
+
+                        int scoreMe = (myStNext - predictedStocks) * 10000 + (myHpNext - predictedHp) * 1000;
+                        if (myStNext <= 0 && myHpNext <= 0) scoreMe -= 5000000;
+
+                        int scoreEn = (enemy.GetStocks() - enStNext) * 15000 + (eNum - enHpNext) * 500;
+                        if (enStNext <= 0 && enHpNext <= 0) scoreEn += 10000000;
+
+                        score += std::max(scoreMe, scoreEn);
+                    }
                 }
             }
             if (canAttack && virtualOp == '\0' && enemy.GetOp() != '\0') score -= 5000;
@@ -1122,16 +1133,13 @@ namespace App {
             if (std::abs(intRes) > m_p2MaxDamage) m_p2MaxDamage = std::abs(intRes);
         }
 
-        // ★ 修正：isCleanDivide を渡して割り切れたかどうかの判定を正確に行う
+        // ★ isCleanDivide を渡す
         ApplyBattleResult(target, resFrac, intRes, aOp, isCleanDivide);
         attacker.SetOp('\0');
 
         AddLog("----------------------------------------");
     }
 
-    // ==========================================
-    // ★ 完璧に修正されたダメージ＆スコア反映ロジック
-    // ==========================================
     void BattleMaster::ApplyBattleResult(UnitBase& unit, const Fraction& resultFrac, int intRes, char op, bool isCleanDivide) {
         std::string targetName = (&unit == m_player.get()) ? "1P" : "2P";
 
@@ -1236,7 +1244,8 @@ namespace App {
             is1PWin = m_is1PWinner;
         }
 
-        bool isOnline = (NetworkManager::GetInstance() != nullptr && NetworkManager::GetInstance()->GetState() == NetworkManager::State::CONNECTED);
+        // ★ 判定条件をOFFLINE以外で統一
+        bool isOnline = (NetworkManager::GetInstance() != nullptr && NetworkManager::GetInstance()->GetState() != NetworkManager::State::OFFLINE);
         if (isOnline) {
             bool isHost = NetworkManager::GetInstance()->IsHost();
             if (!isHost) return !is1PWin;
