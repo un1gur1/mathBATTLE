@@ -41,10 +41,11 @@ namespace App {
     };
 
     enum class NetAction {
-        MOVE,   // 移動フェーズでの操作
-        ACTION  // 行動（攻撃・待機）フェーズでの操作
+        MOVE,           // 通常バトル: 移動
+        ACTION,         // 通常バトル: 行動
+        ROUND_NUMBER,   // ラウンドバトル: 初期数字確定 (targetX = 1..9)
+        ROUND_OPERATOR  // ラウンドバトル: 演算子確定 (targetX = char code)
     };
-
     // バトル用パケット
     struct BattlePacket {
         PacketID id = PacketID::BATTLE; // ← 追加

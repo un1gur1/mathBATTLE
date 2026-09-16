@@ -2,55 +2,16 @@
 #include "BattleMaster.h"
 #include <DxLib.h>
 #include <cmath>
-#include <random>
 #include <algorithm>
-#include <unordered_map>
 #include "../Input/InputManager.h"
-#include "../Scene/SceneManager.h" 
-#include "NetworkManager.h" 
+#include "../Scene/SceneManager.h"
+#include "NetworkManager.h"
+#include "BattleAI.h"
 #include "../Battle/BattleUI.h"
-#include "../Shader/CyberGrid.h" 
 #include "ProceduralAudio.h"
-
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
 
 namespace {
     constexpr int SCREEN_W = 1920;
-    constexpr int SCREEN_H = 1080;
-    constexpr int HEADER_H = 70;
-    constexpr int BOTTOM_PANEL_Y = 830;
-    constexpr int LOG_PANEL_Y = 760;
-
-    inline unsigned int COL_BG() { return GetColor(10, 12, 18); }
-    inline unsigned int COL_PANEL_BG() { return GetColor(18, 18, 22); }
-    inline unsigned int COL_DARK_BG() { return GetColor(14, 16, 20); }
-    inline unsigned int COL_BOTTOM_BG() { return GetColor(5, 5, 8); }
-    inline unsigned int COL_TEXT_MAIN() { return GetColor(255, 255, 255); }
-    inline unsigned int COL_TEXT_SUB() { return GetColor(220, 220, 220); }
-    inline unsigned int COL_TEXT_DARK() { return GetColor(0, 0, 0); }
-
-    inline unsigned int COL_P1() { return GetColor(255, 165, 0); }
-    inline unsigned int COL_P2() { return GetColor(60, 150, 255); }
-
-    inline unsigned int COL_DANGER() { return GetColor(255, 100, 100); }
-    inline unsigned int COL_DANGER_DIM() { return GetColor(200, 50, 50); }
-    inline unsigned int COL_SAFE() { return GetColor(100, 255, 150); }
-    inline unsigned int COL_WARN() { return GetColor(255, 255, 0); }
-    inline unsigned int COL_INFO() { return GetColor(200, 100, 255); }
-    inline unsigned int COL_DISABLE() { return GetColor(150, 150, 150); }
-    inline unsigned int COL_TEXT_OFF() { return GetColor(120, 120, 120); }
-
-    std::mt19937 g_rng(std::random_device{}());
-
-    int GetCachedFont(int size) {
-        static std::unordered_map<int, int> s_fontCache;
-        if (s_fontCache.find(size) == s_fontCache.end()) {
-            s_fontCache[size] = CreateFontToHandle("BIZ UDゴシック", size, 2, DX_FONTTYPE_ANTIALIASING);
-        }
-        return s_fontCache[size];
-    }
 }
 
 namespace App {
@@ -58,9 +19,8 @@ namespace App {
     BattleMaster::BattleMaster()
         : m_currentPhase(Phase::P1_Move)
         , m_gameMode(GameMode::VS_CPU)
-        , m_ruleMode(RuleMode::CLASSIC)
         , m_mapGrid(80, Vector2(600, 120))
-        , m_p1ZeroOneScore(0, 1), m_p2ZeroOneScore(0, 1), m_targetScore(53)
+        , m_p1ZeroOneScore(0, 1), m_p2ZeroOneScore(0, 1)
         , m_isPlayerSelected(false)
         , m_hoverGrid(-1, -1)
         , m_enemyAIStarted(false)
@@ -70,10 +30,7 @@ namespace App {
     {
     }
 
-    BattleMaster::~BattleMaster() {
-        if (m_psHandle != -1) DeleteShader(m_psHandle);
-        if (m_cbHandle != -1) DeleteShaderConstantBuffer(m_cbHandle);
-    }
+    BattleMaster::~BattleMaster() = default;
 
     void BattleMaster::AddLog(const std::string& message) {
         if (m_ui) {
@@ -109,7 +66,7 @@ namespace App {
     }
 
     void BattleMaster::ReserveOperatorUpkeepIfNeeded(UnitBase& unit, bool is1P) {
-        if (m_ruleMode != RuleMode::CLASSIC) return;
+        if (!m_rule.UsesOperatorUpkeep()) return;
         if (unit.IsMoving()) return;
         if (unit.GetOp() == '\0') return;
 
@@ -122,7 +79,7 @@ namespace App {
     }
 
     void BattleMaster::ApplyOperatorUpkeepCost(bool is1P) {
-        if (m_ruleMode != RuleMode::CLASSIC) return;
+        if (!m_rule.UsesOperatorUpkeep()) return;
 
         bool& pending = is1P ? m_p1OpCostPending : m_p2OpCostPending;
         if (!pending) return;
@@ -146,9 +103,13 @@ namespace App {
     void BattleMaster::FinishActionPhase(bool is1P) {
         ApplyOperatorUpkeepCost(is1P);
 
+        // ラウンド勝利が確定した直後は次ターンへ進めない。
+        if (m_rule.IsRoundBattle() && m_roundPhase != RoundPhase::BATTLE) return;
         if (IsGameOver()) return;
 
-        if (!is1P) {
+        // ラウンドバトルの演算子は各ラウンド開始時にドラフト/配置するため、
+        // 旧モード用のターン経過リスポーンは行わない。
+        if (!is1P && !m_rule.IsRoundBattle()) {
             m_mapGrid.UpdateTurn();
         }
 
@@ -157,10 +118,464 @@ namespace App {
         m_aiWaitTimer = 35;
     }
 
+    int BattleMaster::ReadRoundNumberKey() const {
+        auto& input = InputManager::GetInstance();
+        for (int i = 0; i < 9; ++i) {
+            if (input.IsTrgDown(KEY_INPUT_1 + i) || input.IsTrgDown(KEY_INPUT_NUMPAD1 + i)) {
+                return i + 1;
+            }
+        }
+        return 0;
+    }
+
+    int BattleMaster::ReadRoundOperatorKey() const {
+        auto& input = InputManager::GetInstance();
+        for (int i = 0; i < 4; ++i) {
+            if (input.IsTrgDown(KEY_INPUT_1 + i) || input.IsTrgDown(KEY_INPUT_NUMPAD1 + i)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    bool BattleMaster::IsOnlineBattle() const {
+        return NetworkManager::GetInstance() != nullptr &&
+            NetworkManager::GetInstance()->GetState() == NetworkManager::State::CONNECTED;
+    }
+
+    bool BattleMaster::IsLocalRoundController(bool is1P) const {
+        if (!IsOnlineBattle()) return true;
+        return NetworkManager::GetInstance()->IsHost() == is1P;
+    }
+
+    void BattleMaster::SendRoundSelection(NetAction action, int value) const {
+        if (!IsOnlineBattle()) return;
+        BattlePacket packet;
+        packet.actionType = action;
+        packet.targetX = value;
+        packet.targetY = 0;
+        NetworkManager::GetInstance()->SendBattlePacket(packet);
+    }
+
+    bool BattleMaster::ReceiveRoundSelection(NetAction action, int& value) const {
+        if (!IsOnlineBattle()) return false;
+        BattlePacket packet;
+        if (!NetworkManager::GetInstance()->ReceiveBattlePacket(packet)) return false;
+        if (packet.actionType != action) return false;
+        value = packet.targetX;
+        return true;
+    }
+
+    int BattleMaster::FindRoundOperatorIndex(char op) const {
+        for (int i = 0; i < static_cast<int>(m_roundOperators.size()); ++i) {
+            if (m_roundOperators[i] == op) return i;
+        }
+        return -1;
+    }
+
+    int BattleMaster::FindNextAvailableRoundOperatorIndex(int from, int direction) const {
+        if (direction == 0) direction = 1;
+        int index = from;
+        for (int step = 0; step < static_cast<int>(m_roundOperators.size()); ++step) {
+            index += direction;
+            if (index < 0) index = static_cast<int>(m_roundOperators.size()) - 1;
+            if (index >= static_cast<int>(m_roundOperators.size())) index = 0;
+            if (m_roundOperatorAvailable[index]) return index;
+        }
+        return from;
+    }
+
+    void BattleMaster::ConfirmRoundStartNumber(bool is1P, int number) {
+        number = std::clamp(number, 1, 9);
+
+        if (is1P) {
+            m_p1RoundStartNumber = number;
+            AddLog("【ROUND】 1P 初期数字: " + std::to_string(number));
+            m_roundPhase = RoundPhase::SELECT_P2_NUMBER;
+            m_roundNumberCursor = 5;
+            m_roundSetupWaitTimer = 20;
+        }
+        else {
+            m_p2RoundStartNumber = number;
+            m_roundTarget = m_rule.CalculateRoundTarget(m_p1RoundStartNumber, m_p2RoundStartNumber);
+            m_p1RoundScore = Fraction(m_p1RoundStartNumber);
+            m_p2RoundScore = Fraction(m_p2RoundStartNumber);
+            m_p1DisplayScore = static_cast<float>(m_p1RoundStartNumber);
+            m_p2DisplayScore = static_cast<float>(m_p2RoundStartNumber);
+
+            if (m_player) m_player->SetNumber(m_p1RoundStartNumber);
+            if (m_enemy) m_enemy->SetNumber(m_p2RoundStartNumber);
+
+            AddLog("【ROUND】 2P 初期数字: " + std::to_string(number));
+            AddLog("【TARGET】 9 + " + std::to_string(m_p1RoundStartNumber) +
+                " + " + std::to_string(m_p2RoundStartNumber) +
+                " = " + std::to_string(m_roundTarget));
+            m_roundPhase = RoundPhase::TARGET_REVEAL;
+            m_roundSetupWaitTimer = 60;
+        }
+
+        ProceduralAudio::GetInstance().PlayPowerSE(number);
+    }
+
+    void BattleMaster::ConfirmRoundOperator(bool is1P, char op) {
+        const int index = FindRoundOperatorIndex(op);
+        if (index < 0 || !m_roundOperatorAvailable[index]) return;
+
+        m_roundOperatorAvailable[index] = false;
+        if (is1P) {
+            m_p1DraftedOperator = op;
+            if (m_player) m_player->SetOp(op);
+            AddLog("【DRAFT】 1P が [" + std::string(1, op) + "] を選択");
+            m_roundPhase = RoundPhase::DRAFT_P2_OPERATOR;
+            m_roundOperatorCursor = FindNextAvailableRoundOperatorIndex(index, 1);
+            m_roundSetupWaitTimer = 20;
+        }
+        else {
+            m_p2DraftedOperator = op;
+            if (m_enemy) m_enemy->SetOp(op);
+            AddLog("【DRAFT】 2P が [" + std::string(1, op) + "] を選択");
+            PlaceRemainingRoundOperators();
+            m_roundPhase = RoundPhase::PLACE_OPERATORS;
+            m_roundSetupWaitTimer = 75;
+        }
+
+        if (op == '+') ProceduralAudio::GetInstance().PlayPowerSE(5);
+        else if (op == '-') ProceduralAudio::GetInstance().PlayPowerSE(2);
+        else if (op == '*') ProceduralAudio::GetInstance().PlayPowerSE(7);
+        else if (op == '/') ProceduralAudio::GetInstance().PlayPowerSE(9);
+    }
+
+    void BattleMaster::PlaceRemainingRoundOperators() {
+        std::array<char, 2> remaining{ '\0', '\0' };
+        int count = 0;
+        for (int i = 0; i < static_cast<int>(m_roundOperators.size()) && count < 2; ++i) {
+            if (m_roundOperatorAvailable[i]) remaining[count++] = m_roundOperators[i];
+        }
+
+        m_mapGrid.ClearItems();
+
+        // 完全固定配置では初期位置と衝突し得るため、候補順だけ固定し、
+        // 駒がいるマスを飛ばして最初の2マスへ置く。ランダム性はない。
+        const std::array<IntVector2, 9> candidates{
+            IntVector2{ 2, 4 }, IntVector2{ 6, 4 },
+            IntVector2{ 4, 2 }, IntVector2{ 4, 6 },
+            IntVector2{ 4, 4 }, IntVector2{ 2, 2 },
+            IntVector2{ 6, 6 }, IntVector2{ 6, 2 }, IntVector2{ 2, 6 }
+        };
+
+        IntVector2 first{ -1, -1 };
+        IntVector2 second{ -1, -1 };
+        const IntVector2 p1 = m_player ? m_player->GetGridPos() : IntVector2{ -1, -1 };
+        const IntVector2 p2 = m_enemy ? m_enemy->GetGridPos() : IntVector2{ -1, -1 };
+
+        for (const IntVector2& pos : candidates) {
+            if (pos == p1 || pos == p2) continue;
+            if (first.x < 0) first = pos;
+            else { second = pos; break; }
+        }
+
+        m_roundPlacedOperator1 = remaining[0];
+        m_roundPlacedOperator2 = remaining[1];
+        m_roundPlacedPos1 = first;
+        m_roundPlacedPos2 = second;
+
+        if (m_roundPlacedOperator1 != '\0' && first.x >= 0) {
+            m_mapGrid.SetItemAt(first.x, first.y, m_roundPlacedOperator1);
+        }
+        if (m_roundPlacedOperator2 != '\0' && second.x >= 0) {
+            m_mapGrid.SetItemAt(second.x, second.y, m_roundPlacedOperator2);
+        }
+
+        AddLog("【FIELD】 残り演算子 [" + std::string(1, m_roundPlacedOperator1) + "] [" +
+            std::string(1, m_roundPlacedOperator2) + "] を盤面へ配置");
+    }
+
+    void BattleMaster::BeginRoundBattle() {
+        m_roundPhase = RoundPhase::BATTLE;
+        m_currentPhase = Phase::P1_TurnStart;
+        m_turnStartTimer = 80;
+        m_aiWaitTimer = 30;
+        m_isPlayerSelected = false;
+        m_playerAIStarted = false;
+        m_enemyAIStarted = false;
+        m_p1OpCostPending = false;
+        m_p2OpCostPending = false;
+
+        AddLog("【ROUND " + std::to_string(m_roundNumber) + "】 BATTLE START / TARGET " + std::to_string(m_roundTarget));
+        AddLog("1P SCORE=" + m_p1RoundScore.ToString() + "  2P SCORE=" + m_p2RoundScore.ToString());
+        ProceduralAudio::GetInstance().PlayPowerSE(9);
+    }
+
+    void BattleMaster::EndRound(int winnerSide) {
+        if (!m_rule.IsRoundBattle() || m_roundPhase != RoundPhase::BATTLE) return;
+        if (winnerSide != 1 && winnerSide != 2) return;
+
+        m_roundWinner = winnerSide;
+        UnitBase* loser = winnerSide == 1 ? static_cast<UnitBase*>(m_enemy.get()) : static_cast<UnitBase*>(m_player.get());
+        if (loser) loser->AddStocks(-1);
+
+        const int loserStocks = loser ? loser->GetStocks() : 0;
+        AddLog("【ROUND WIN】 " + std::to_string(winnerSide) + "P がTARGET到達！");
+        AddLog("【STOCK】 " + std::string(winnerSide == 1 ? "2P" : "1P") + " STOCK -1 -> " + std::to_string(loserStocks));
+
+        m_roundPhase = RoundPhase::ROUND_END;
+        m_roundSetupWaitTimer = 120;
+        m_effectIntensity = 2.5f;
+        ProceduralAudio::GetInstance().PlayPowerSE(9);
+
+        if (loserStocks <= 0) {
+            m_isBattleFinished = true;
+            m_is1PWinner = (winnerSide == 1);
+            AddLog("【GAME SET】 " + std::to_string(winnerSide) + "P WIN");
+        }
+    }
+
+    void BattleMaster::ResetRoundBoardState() {
+        const int p1Stocks = m_player ? m_player->GetStocks() : 0;
+        const int p2Stocks = m_enemy ? m_enemy->GetStocks() : 0;
+        const int p1Max = m_player ? m_player->GetMaxStocks() : p1Stocks;
+        const int p2Max = m_enemy ? m_enemy->GetMaxStocks() : p2Stocks;
+
+        m_player = std::make_unique<Player>(
+            m_p1RoundStartPos,
+            m_mapGrid.GetCellCenter(m_p1RoundStartPos.x, m_p1RoundStartPos.y),
+            5,
+            p1Stocks,
+            p1Max);
+        m_enemy = std::make_unique<Enemy>(
+            m_p2RoundStartPos,
+            m_mapGrid.GetCellCenter(m_p2RoundStartPos.x, m_p2RoundStartPos.y),
+            5,
+            p2Stocks,
+            p2Max);
+
+        m_player->SetOp('\0');
+        m_enemy->SetOp('\0');
+        m_mapGrid.ClearItems();
+
+        m_p1RoundStartNumber = 0;
+        m_p2RoundStartNumber = 0;
+        m_roundTarget = 0;
+        m_roundNumberCursor = 5;
+        m_p1RoundScore = Fraction(0);
+        m_p2RoundScore = Fraction(0);
+        m_p1DisplayScore = 0.0f;
+        m_p2DisplayScore = 0.0f;
+
+        m_roundOperatorAvailable = { true, true, true, true };
+        m_roundOperatorCursor = 0;
+        m_p1DraftedOperator = '\0';
+        m_p2DraftedOperator = '\0';
+        m_roundPlacedOperator1 = '\0';
+        m_roundPlacedOperator2 = '\0';
+        m_roundPlacedPos1 = { -1, -1 };
+        m_roundPlacedPos2 = { -1, -1 };
+        m_roundWinner = 0;
+
+        m_currentPhase = Phase::P1_TurnStart;
+        m_turnStartTimer = 0;
+        m_aiWaitTimer = 30;
+        m_isPlayerSelected = false;
+        m_playerAIStarted = false;
+        m_enemyAIStarted = false;
+        if (m_ai) m_ai->Reset();
+    }
+
+    void BattleMaster::PrepareNextRound() {
+        if (m_isBattleFinished) {
+            m_roundPhase = RoundPhase::INACTIVE;
+            m_currentPhase = Phase::FINISH;
+            m_finishTimer = 0;
+            m_effectIntensity = 1.0f;
+            return;
+        }
+
+        ++m_roundNumber;
+        ResetRoundBoardState();
+        m_roundPhase = RoundPhase::ROUND_START;
+        m_roundSetupWaitTimer = 30;
+        AddLog(">>> ROUND " + std::to_string(m_roundNumber) + " START");
+    }
+
+    void BattleMaster::UpdateRoundSetup() {
+        auto& input = InputManager::GetInstance();
+        if (m_roundSetupWaitTimer > 0) --m_roundSetupWaitTimer;
+
+        const bool confirm = input.IsTrgDown(KEY_INPUT_SPACE) || input.IsTrgDown(KEY_INPUT_RETURN);
+        const bool back = input.IsTrgDown(KEY_INPUT_B) || input.IsTrgDown(KEY_INPUT_BACK);
+        const bool online = IsOnlineBattle();
+
+        switch (m_roundPhase) {
+        case RoundPhase::ROUND_START:
+            if ((confirm && !online && m_roundSetupWaitTimer <= 0) ||
+                (m_roundSetupWaitTimer <= 0 && (online || (m_is1P_NPC && m_is2P_NPC)))) {
+                m_roundPhase = RoundPhase::SELECT_P1_NUMBER;
+                m_roundNumberCursor = 5;
+                m_roundSetupWaitTimer = 10;
+                ProceduralAudio::GetInstance().PlayPowerSE(9);
+            }
+            break;
+
+        case RoundPhase::SELECT_P1_NUMBER:
+        case RoundPhase::SELECT_P2_NUMBER:
+        {
+            const bool is1P = (m_roundPhase == RoundPhase::SELECT_P1_NUMBER);
+            const bool localController = IsLocalRoundController(is1P);
+            const bool isNPC = !online && (is1P ? m_is1P_NPC : m_is2P_NPC);
+
+            if (!localController) {
+                int remoteValue = 0;
+                if (ReceiveRoundSelection(NetAction::ROUND_NUMBER, remoteValue)) {
+                    ConfirmRoundStartNumber(is1P, remoteValue);
+                }
+                break;
+            }
+
+            if (isNPC) {
+                if (m_roundSetupWaitTimer <= 0 && m_ai) {
+                    ConfirmRoundStartNumber(is1P, m_ai->ChooseRoundStartNumber());
+                }
+                break;
+            }
+
+            const int directNumber = ReadRoundNumberKey();
+            if (directNumber != 0 && directNumber != m_roundNumberCursor) {
+                m_roundNumberCursor = directNumber;
+                ProceduralAudio::GetInstance().PlayPowerSE(2);
+            }
+            if (input.IsTrgDown(KEY_INPUT_LEFT) || input.IsTrgDown(KEY_INPUT_A)) {
+                --m_roundNumberCursor;
+                if (m_roundNumberCursor < 1) m_roundNumberCursor = 9;
+                ProceduralAudio::GetInstance().PlayPowerSE(2);
+            }
+            if (input.IsTrgDown(KEY_INPUT_RIGHT) || input.IsTrgDown(KEY_INPUT_D)) {
+                ++m_roundNumberCursor;
+                if (m_roundNumberCursor > 9) m_roundNumberCursor = 1;
+                ProceduralAudio::GetInstance().PlayPowerSE(2);
+            }
+
+            if (!online && back && m_roundSetupWaitTimer <= 0) {
+                if (is1P) {
+                    m_roundPhase = RoundPhase::ROUND_START;
+                }
+                else {
+                    m_roundPhase = RoundPhase::SELECT_P1_NUMBER;
+                    m_roundNumberCursor = m_p1RoundStartNumber > 0 ? m_p1RoundStartNumber : 5;
+                    m_p1RoundStartNumber = 0;
+                }
+                m_roundSetupWaitTimer = 10;
+                ProceduralAudio::GetInstance().PlayErrorSE();
+                break;
+            }
+
+            if (confirm && m_roundSetupWaitTimer <= 0) {
+                if (online) SendRoundSelection(NetAction::ROUND_NUMBER, m_roundNumberCursor);
+                ConfirmRoundStartNumber(is1P, m_roundNumberCursor);
+            }
+            break;
+        }
+
+        case RoundPhase::TARGET_REVEAL:
+            if (m_roundSetupWaitTimer <= 0 || (!online && confirm)) {
+                m_roundPhase = RoundPhase::DRAFT_P1_OPERATOR;
+                m_roundOperatorCursor = FindNextAvailableRoundOperatorIndex(-1, 1);
+                m_roundSetupWaitTimer = 15;
+                ProceduralAudio::GetInstance().PlayPowerSE(9);
+            }
+            break;
+
+        case RoundPhase::DRAFT_P1_OPERATOR:
+        case RoundPhase::DRAFT_P2_OPERATOR:
+        {
+            const bool is1P = (m_roundPhase == RoundPhase::DRAFT_P1_OPERATOR);
+            const bool localController = IsLocalRoundController(is1P);
+            const bool isNPC = !online && (is1P ? m_is1P_NPC : m_is2P_NPC);
+
+            if (!localController) {
+                int remoteValue = 0;
+                if (ReceiveRoundSelection(NetAction::ROUND_OPERATOR, remoteValue)) {
+                    ConfirmRoundOperator(is1P, static_cast<char>(remoteValue));
+                }
+                break;
+            }
+
+            if (isNPC) {
+                if (m_roundSetupWaitTimer <= 0 && m_ai) {
+                    const Fraction myScore = is1P ? m_p1RoundScore : m_p2RoundScore;
+                    const int myNumber = is1P ? m_p1RoundStartNumber : m_p2RoundStartNumber;
+                    const int enemyNumber = is1P ? m_p2RoundStartNumber : m_p1RoundStartNumber;
+                    const char chosen = m_ai->ChooseRoundOperator(
+                        m_roundOperatorAvailable, myNumber, enemyNumber, myScore, m_roundTarget, m_rule);
+                    ConfirmRoundOperator(is1P, chosen);
+                }
+                break;
+            }
+
+            const int directIndex = ReadRoundOperatorKey();
+            if (directIndex >= 0 && m_roundOperatorAvailable[directIndex]) {
+                m_roundOperatorCursor = directIndex;
+            }
+            if (input.IsTrgDown(KEY_INPUT_LEFT) || input.IsTrgDown(KEY_INPUT_A)) {
+                m_roundOperatorCursor = FindNextAvailableRoundOperatorIndex(m_roundOperatorCursor, -1);
+                ProceduralAudio::GetInstance().PlayPowerSE(2);
+            }
+            if (input.IsTrgDown(KEY_INPUT_RIGHT) || input.IsTrgDown(KEY_INPUT_D)) {
+                m_roundOperatorCursor = FindNextAvailableRoundOperatorIndex(m_roundOperatorCursor, 1);
+                ProceduralAudio::GetInstance().PlayPowerSE(2);
+            }
+
+            if (!online && back && m_roundSetupWaitTimer <= 0) {
+                if (is1P) {
+                    m_roundPhase = RoundPhase::TARGET_REVEAL;
+                    m_roundSetupWaitTimer = 10;
+                }
+                else {
+                    const int p1Index = FindRoundOperatorIndex(m_p1DraftedOperator);
+                    if (p1Index >= 0) m_roundOperatorAvailable[p1Index] = true;
+                    m_p1DraftedOperator = '\0';
+                    if (m_player) m_player->SetOp('\0');
+                    m_roundPhase = RoundPhase::DRAFT_P1_OPERATOR;
+                    m_roundOperatorCursor = FindNextAvailableRoundOperatorIndex(-1, 1);
+                    m_roundSetupWaitTimer = 10;
+                }
+                ProceduralAudio::GetInstance().PlayErrorSE();
+                break;
+            }
+
+            if (confirm && m_roundSetupWaitTimer <= 0 &&
+                m_roundOperatorCursor >= 0 && m_roundOperatorCursor < 4 &&
+                m_roundOperatorAvailable[m_roundOperatorCursor]) {
+                const char op = m_roundOperators[m_roundOperatorCursor];
+                if (online) SendRoundSelection(NetAction::ROUND_OPERATOR, static_cast<int>(op));
+                ConfirmRoundOperator(is1P, op);
+            }
+            break;
+        }
+
+        case RoundPhase::PLACE_OPERATORS:
+            if (m_roundSetupWaitTimer <= 0 || (!online && confirm)) {
+                BeginRoundBattle();
+            }
+            break;
+
+        case RoundPhase::ROUND_END:
+            if (m_roundSetupWaitTimer <= 0 || (!online && confirm)) {
+                PrepareNextRound();
+            }
+            break;
+
+        default:
+            break;
+        }
+    }
+
     void BattleMaster::Init() {
         auto* sm = SceneManager::GetInstance();
         m_gameMode = (sm->GetPlayerCount() == 1) ? GameMode::VS_CPU : GameMode::VS_PLAYER;
-        m_ruleMode = (sm->GetGameMode() == 0) ? RuleMode::CLASSIC : RuleMode::ZERO_ONE;
+        BattleRuleKind ruleKind = BattleRuleKind::CLASSIC;
+        if (sm->GetGameMode() == 1) ruleKind = BattleRuleKind::ZERO_ONE;
+        else if (sm->GetGameMode() == 2) ruleKind = BattleRuleKind::ROUND_BATTLE;
+        m_rule.Configure(ruleKind, sm->GetZeroOneScore());
 
         // ★ 完全修正版：OFFLINE以外ならオンライン対戦とみなす ★
         // （Initの時点では接続待機中のためCONNECTEDにならないことを考慮）
@@ -180,7 +595,6 @@ namespace App {
         }
 
         int maxStocks = sm->GetMaxStocks();
-        m_targetScore = sm->GetZeroOneScore();
         m_p1ZeroOneScore = Fraction(0, 1);
         m_p2ZeroOneScore = Fraction(0, 1);
 
@@ -189,8 +603,12 @@ namespace App {
 
         IntVector2 p1StartPos{ sm->Get1PStartX(), sm->Get1PStartY() };
         IntVector2 p2StartPos{ sm->Get2PStartX(), sm->Get2PStartY() };
+        m_p1RoundStartPos = p1StartPos;
+        m_p2RoundStartPos = p2StartPos;
 
-        BattleRuleMode mapMode = (m_ruleMode == RuleMode::CLASSIC) ? BattleRuleMode::CLASSIC : BattleRuleMode::ZERO_ONE;
+        // MapGridは現時点で旧2モードのみ。ラウンド専用盤面生成は次段階で追加するため、
+        // 土台段階ではCLASSIC側の盤面表現を使用する。
+        BattleRuleMode mapMode = m_rule.IsZeroOne() ? BattleRuleMode::ZERO_ONE : BattleRuleMode::CLASSIC;
 
         m_player = std::make_unique<Player>(p1StartPos, m_mapGrid.GetCellCenter(p1StartPos.x, p1StartPos.y), sm->Get1PStartNum(), maxStocks, maxStocks);
         m_enemy = std::make_unique<Enemy>(p2StartPos, m_mapGrid.GetCellCenter(p2StartPos.x, p2StartPos.y), sm->Get2PStartNum(), maxStocks, maxStocks);
@@ -203,22 +621,16 @@ namespace App {
         m_enemyAIStarted = false;
         m_playerAIStarted = false;
         m_finishTimer = 0;
-        m_logScrollOffset = 0;
-        m_uiCursorX_1P = 0.0f;
-        m_uiCursorX_2P = 0.0f;
 
         m_startTime = GetNowCount();
         m_p1TotalMoves = 0; m_p2TotalMoves = 0;
         m_p1TotalOps = 0;   m_p2TotalOps = 0;
         m_p1MaxDamage = 0;  m_p2MaxDamage = 0;
 
-        m_psHandle = LoadPixelShaderFromMem(g_ps_CyberGrid, sizeof(g_ps_CyberGrid));
-        m_cbHandle = CreateShaderConstantBuffer(sizeof(float) * 4);
-        m_shaderTime = 0.0f;
         m_effectIntensity = 0.0f;
 
-        g_aiStayCount1P = 0;
-        g_aiStayCount2P = 0;
+        if (!m_ai) m_ai = std::make_unique<BattleAI>();
+        m_ai->Reset();
 
         m_p1OpCostPending = false;
         m_p2OpCostPending = false;
@@ -229,51 +641,378 @@ namespace App {
         m_currentPhase = Phase::P1_TurnStart;
         m_turnStartTimer = 80;
         m_aiWaitTimer = 30;
+
+        m_roundPhase = RoundPhase::INACTIVE;
+        m_roundNumber = 0;
+        m_p1RoundStartNumber = 0;
+        m_p2RoundStartNumber = 0;
+        m_roundTarget = 0;
+        m_roundNumberCursor = 5;
+        m_roundSetupWaitTimer = 0;
+        m_p1RoundScore = Fraction(0);
+        m_p2RoundScore = Fraction(0);
+        m_roundOperatorAvailable = { true, true, true, true };
+        m_roundOperatorCursor = 0;
+        m_p1DraftedOperator = '\0';
+        m_p2DraftedOperator = '\0';
+        m_roundPlacedOperator1 = '\0';
+        m_roundPlacedOperator2 = '\0';
+        m_roundPlacedPos1 = { -1, -1 };
+        m_roundPlacedPos2 = { -1, -1 };
+        m_roundWinner = 0;
+        if (m_rule.IsRoundBattle()) {
+            m_roundPhase = RoundPhase::ROUND_START;
+            m_roundNumber = 1;
+            m_roundSetupWaitTimer = 15;
+            m_turnStartTimer = 0;
+        }
+
         m_ui = std::make_unique<BattleUI>();
         m_ui->Init();
         int stageIdx = sm->GetStageIndex();
         m_mapGrid.SetRuleModeAndStage(mapMode, stageIdx);
-        m_actionLog.clear();
-        std::string rModeStr = (m_ruleMode == RuleMode::CLASSIC) ? "ノーマル" : "カウント";
+        if (m_rule.IsRoundBattle()) {
+            // ラウンド用演算子はドラフト後に2個だけ配置する。
+            m_mapGrid.ClearItems();
+        }
+        std::string rModeStr = m_rule.IsClassic() ? "ノーマル" : (m_rule.IsZeroOne() ? "カウント" : "ラウンド");
         AddLog(">>> バトル開始！ [1P:" + std::string(m_is1P_NPC ? "COM" : "PLAYER") + " vs 2P:" + std::string(m_is2P_NPC ? "COM" : "PLAYER") + " / " + rModeStr + "]");
 
-        if (m_ruleMode == RuleMode::ZERO_ONE) AddLog(">>> 目標：相手よりはやくスコアを【 " + std::to_string(m_targetScore) + " 】にしよう！");
-        else AddLog(">>> 目標：相手の残機をなくして、勝利を目指そう！");
+        if (m_rule.IsZeroOne()) {
+            AddLog(">>> 目標：相手よりはやくスコアを【 " + std::to_string(m_rule.GetTargetScore()) + " 】にしよう！");
+        }
+        else if (m_rule.IsRoundBattle()) {
+            AddLog(">>> ROUND 1 START：ラウンド固有の数字・演算子選択はBattle側で進行します。");
+        }
+        else {
+            AddLog(">>> 目標：相手の残機をなくして、勝利を目指そう！");
+        }
     }
 
     bool BattleMaster::CanMove(int number, char op, IntVector2 start, IntVector2 target, int& outCost) const {
-        if (start == target) return false;
+        const UnitBase* unit = nullptr;
+        if (m_player && m_player->GetGridPos() == start) unit = m_player.get();
+        else if (m_enemy && m_enemy->GetGridPos() == start) unit = m_enemy.get();
 
-        UnitBase* u = nullptr;
-        if (m_player && m_player->GetGridPos() == start) u = m_player.get();
-        else if (m_enemy && m_enemy->GetGridPos() == start) u = m_enemy.get();
-
-        if (u && u->HasWarpNode(target)) { outCost = 1; return true; }
-
-        int dx = std::abs(target.x - start.x);
-        int dy = std::abs(target.y - start.y);
-        int maxDist = 3 - ((number - 1) % 3);
-
-        bool isValidDirection = false;
-        bool isJump = false;
-        if (number >= 1 && number <= 3) isValidDirection = (dx == 0 || dy == 0);
-        else if (number >= 4 && number <= 6) isValidDirection = (dx == dy);
-        else if (number >= 7 && number <= 9) isValidDirection = (dx == 0 || dy == 0 || dx == dy);
-
-        if (op == '+') isValidDirection |= (dx == 0 || dy == 0);
-        else if (op == '-') isValidDirection |= (dy == 0);
-        else if (op == '*') isValidDirection |= (dx == dy);
-        else if (op == '/') {
-            isValidDirection |= (dy == 0);
-            if (dx == 0 && dy == 2) { isValidDirection = true; isJump = true; }
-        }
-
-        if (isValidDirection) {
-            if (isJump) { outCost = 2; return true; }
-            else if (dx <= maxDist && dy <= maxDist) { outCost = (std::max)(dx, dy); return true; }
-        }
-        return false;
+        const bool isWarpNode = unit && unit->HasWarpNode(target);
+        return m_rule.CanMove(number, op, start, target, isWarpNode, outCost);
     }
+
+    BattleViewData BattleMaster::BuildBattleViewData() const {
+        BattleViewData view;
+        view.map = &m_mapGrid;
+
+        switch (m_currentPhase) {
+        case Phase::P1_TurnStart: view.phase = BattleViewPhase::P1_TurnStart; break;
+        case Phase::P1_Move:      view.phase = BattleViewPhase::P1_Move; break;
+        case Phase::P1_Action:    view.phase = BattleViewPhase::P1_Action; break;
+        case Phase::P2_TurnStart: view.phase = BattleViewPhase::P2_TurnStart; break;
+        case Phase::P2_Move:      view.phase = BattleViewPhase::P2_Move; break;
+        case Phase::P2_Action:    view.phase = BattleViewPhase::P2_Action; break;
+        case Phase::FINISH:       view.phase = BattleViewPhase::FINISH; break;
+        }
+
+        if (m_rule.IsRoundBattle()) view.ruleMode = BattleViewRuleMode::ROUND_BATTLE;
+        else if (m_rule.IsZeroOne()) view.ruleMode = BattleViewRuleMode::ZERO_ONE;
+        else view.ruleMode = BattleViewRuleMode::CLASSIC;
+
+        switch (m_roundPhase) {
+        case RoundPhase::ROUND_START:       view.roundPhase = BattleRoundViewPhase::ROUND_START; break;
+        case RoundPhase::SELECT_P1_NUMBER:  view.roundPhase = BattleRoundViewPhase::SELECT_P1_NUMBER; break;
+        case RoundPhase::SELECT_P2_NUMBER:  view.roundPhase = BattleRoundViewPhase::SELECT_P2_NUMBER; break;
+        case RoundPhase::TARGET_REVEAL:     view.roundPhase = BattleRoundViewPhase::TARGET_REVEAL; break;
+        case RoundPhase::DRAFT_P1_OPERATOR: view.roundPhase = BattleRoundViewPhase::DRAFT_P1_OPERATOR; break;
+        case RoundPhase::DRAFT_P2_OPERATOR: view.roundPhase = BattleRoundViewPhase::DRAFT_P2_OPERATOR; break;
+        case RoundPhase::PLACE_OPERATORS:   view.roundPhase = BattleRoundViewPhase::PLACE_OPERATORS; break;
+        case RoundPhase::BATTLE:            view.roundPhase = BattleRoundViewPhase::BATTLE; break;
+        case RoundPhase::ROUND_END:         view.roundPhase = BattleRoundViewPhase::ROUND_END; break;
+        case RoundPhase::INACTIVE:          view.roundPhase = BattleRoundViewPhase::INACTIVE; break;
+        }
+        view.roundSetupActive = m_rule.IsRoundBattle() && m_roundPhase != RoundPhase::INACTIVE && m_roundPhase != RoundPhase::BATTLE;
+        view.roundNumber = m_roundNumber;
+        view.p1RoundStartNumber = m_p1RoundStartNumber;
+        view.p2RoundStartNumber = m_p2RoundStartNumber;
+        view.roundTarget = m_roundTarget;
+        view.roundNumberCursor = m_roundNumberCursor;
+        view.roundOperators = m_roundOperators;
+        view.roundOperatorAvailable = m_roundOperatorAvailable;
+        view.roundOperatorCursor = m_roundOperatorCursor;
+        view.p1DraftedOperator = m_p1DraftedOperator;
+        view.p2DraftedOperator = m_p2DraftedOperator;
+        view.roundPlacedOperator1 = m_roundPlacedOperator1;
+        view.roundPlacedOperator2 = m_roundPlacedOperator2;
+        view.roundPlacedPos1 = m_roundPlacedPos1;
+        view.roundPlacedPos2 = m_roundPlacedPos2;
+        view.roundWinner = m_roundWinner;
+        if (IsOnlineBattle()) {
+            if (m_roundPhase == RoundPhase::SELECT_P1_NUMBER || m_roundPhase == RoundPhase::DRAFT_P1_OPERATOR) {
+                view.roundWaitingForRemote = !IsLocalRoundController(true);
+            }
+            else if (m_roundPhase == RoundPhase::SELECT_P2_NUMBER || m_roundPhase == RoundPhase::DRAFT_P2_OPERATOR) {
+                view.roundWaitingForRemote = !IsLocalRoundController(false);
+            }
+        }
+        view.is1PTurn = Is1PTurn();
+        view.gameOver = IsGameOver();
+        view.playerSelected = m_isPlayerSelected;
+        view.totalTurns = m_mapGrid.GetTotalTurns();
+        view.targetScore = m_rule.IsRoundBattle() ? m_roundTarget : m_rule.GetTargetScore();
+        view.turnStartTimer = m_turnStartTimer;
+        view.finishTimer = m_finishTimer;
+        view.hoverGrid = m_hoverGrid;
+
+        auto fillUnit = [&](BattleUnitView& dst, UnitBase* unit, bool is1P) {
+            if (!unit) return;
+            dst.unit = unit;
+            dst.isNPC = is1P ? m_is1P_NPC : m_is2P_NPC;
+            dst.activeTurn = (is1P == view.is1PTurn) && m_currentPhase != Phase::FINISH;
+            dst.number = unit->GetNumber();
+            dst.stocks = unit->GetStocks();
+            dst.maxStocks = unit->GetMaxStocks();
+            dst.op = unit->GetOp();
+            dst.gridPos = unit->GetGridPos();
+            const Fraction& score = m_rule.IsRoundBattle()
+                ? (is1P ? m_p1RoundScore : m_p2RoundScore)
+                : (is1P ? m_p1ZeroOneScore : m_p2ZeroOneScore);
+            dst.score = { score.n, score.d };
+            dst.displayScore = is1P ? GetP1DisplayScore() : GetP2DisplayScore();
+            dst.moveDistance = m_rule.GetMoveDistance(dst.number);
+            dst.moveDirectionDots = m_rule.BuildBaseMoveDirectionDots(dst.number);
+            dst.warpNodes = unit->GetWarpNodes();
+            };
+
+        fillUnit(view.p1, m_player.get(), true);
+        fillUnit(view.p2, m_enemy.get(), false);
+
+        UnitBase* activeActor = GetActiveUnit();
+        UnitBase* activeTarget = GetTargetUnit();
+        const bool activeIs1P = (activeActor && activeActor == m_player.get());
+
+        if (activeActor) {
+            view.hasActiveUnit = true;
+            view.activeUnitIs1P = activeIs1P;
+            view.activeGrid = activeActor->GetGridPos();
+        }
+
+        // 敵危険範囲は「相手が次に移動できる場所」をMaster側で確定して渡す。
+        if (activeTarget && activeTarget->GetStocks() > 0 && !activeTarget->IsMoving()) {
+            IntVector2 start = activeTarget->GetGridPos();
+            for (int x = 0; x < m_mapGrid.GetWidth(); ++x) {
+                for (int y = 0; y < m_mapGrid.GetHeight(); ++y) {
+                    IntVector2 target{ x, y };
+                    if (target == start) continue;
+                    int baseCost = 0;
+                    int combinedCost = 0;
+                    bool base = CanMove(activeTarget->GetNumber(), '\0', start, target, baseCost);
+                    bool combined = CanMove(activeTarget->GetNumber(), activeTarget->GetOp(), start, target, combinedCost);
+                    if (combined) {
+                        view.enemyDangerCells.push_back({ target, combinedCost, base, activeTarget->HasWarpNode(target) });
+                    }
+                }
+            }
+        }
+
+        bool isMovePhase = (m_currentPhase == Phase::P1_Move || m_currentPhase == Phase::P2_Move);
+        bool isActionPhase = (m_currentPhase == Phase::P1_Action || m_currentPhase == Phase::P2_Action);
+
+        int previewCost = 0;
+        int previewNumber = activeActor ? activeActor->GetNumber() : 0;
+        int previewStocks = activeActor ? activeActor->GetStocks() : 0;
+        char previewOp = activeActor ? activeActor->GetOp() : '\0';
+        bool movePreview = false;
+        bool previewNextToEnemy = false;
+
+        if (m_isPlayerSelected && activeActor && !activeActor->IsMoving() && isMovePhase) {
+            IntVector2 start = activeActor->GetGridPos();
+            for (int x = 0; x < m_mapGrid.GetWidth(); ++x) {
+                for (int y = 0; y < m_mapGrid.GetHeight(); ++y) {
+                    IntVector2 target{ x, y };
+                    if (target == start) continue;
+                    int baseCost = 0;
+                    int combinedCost = 0;
+                    bool base = CanMove(activeActor->GetNumber(), '\0', start, target, baseCost);
+                    bool combined = CanMove(activeActor->GetNumber(), activeActor->GetOp(), start, target, combinedCost);
+                    if (combined || activeActor->HasWarpNode(target)) {
+                        view.movableCells.push_back({ target, combinedCost, base, activeActor->HasWarpNode(target) });
+                    }
+                }
+            }
+
+            if (m_mapGrid.IsWithinBounds(m_hoverGrid.x, m_hoverGrid.y)) {
+                if (m_hoverGrid == start) {
+                    movePreview = true;
+                    previewCost = 1;
+                }
+                else if (CanMove(activeActor->GetNumber(), activeActor->GetOp(), start, m_hoverGrid, previewCost)) {
+                    movePreview = true;
+                }
+
+                if (movePreview) {
+                    view.hoverMoveValid = true;
+                    view.hoverMoveGrid = m_hoverGrid;
+                    view.hoverMoveCost = previewCost;
+
+                    BattleSimulatedUnitState moved = m_rule.IsRoundBattle()
+                        ? m_rule.SimulateRoundMoveCost(activeActor->GetNumber(), activeActor->GetStocks(), previewCost)
+                        : m_rule.SimulateMoveCost(activeActor->GetNumber(), activeActor->GetStocks(), activeActor->GetMaxStocks(), previewCost);
+                    previewNumber = moved.number;
+                    previewStocks = moved.stocks;
+
+                    BattleUnitView& activeView = activeIs1P ? view.p1 : view.p2;
+                    activeView.hasPowerPreview = true;
+                    activeView.previewNumber = previewNumber;
+                    activeView.previewStocks = previewStocks;
+                    activeView.previewDefeated = moved.defeated;
+                    if (!moved.defeated && previewNumber >= 1 && previewNumber <= 9) {
+                        activeView.previewMoveDistance = m_rule.GetMoveDistance(previewNumber);
+                        activeView.previewMoveDirectionDots = m_rule.BuildBaseMoveDirectionDots(previewNumber);
+                    }
+
+                    char itemOnGrid = m_mapGrid.GetItemAt(m_hoverGrid.x, m_hoverGrid.y);
+                    if (itemOnGrid != '\0') previewOp = itemOnGrid;
+
+                    if (activeTarget) {
+                        IntVector2 targetPos = activeTarget->GetGridPos();
+                        previewNextToEnemy = (m_rule.IsAdjacent(m_hoverGrid, targetPos) && previewOp != '\0');
+                    }
+                }
+            }
+        }
+
+        IntVector2 actorPos = activeActor ? activeActor->GetGridPos() : IntVector2{ -1, -1 };
+        IntVector2 targetPos = activeTarget ? activeTarget->GetGridPos() : IntVector2{ -1, -1 };
+        view.canAttack = activeActor && activeTarget && m_rule.IsAdjacent(actorPos, targetPos);
+        view.hasOperator = activeActor && activeActor->GetOp() != '\0';
+        view.humanActionPhase = isActionPhase && ((view.is1PTurn && !m_is1P_NPC) || (!view.is1PTurn && !m_is2P_NPC));
+
+        Vector2 mousePos = InputManager::GetInstance().GetMousePos();
+        view.hoverNoActionButton = CheckButtonClick(1100, 960, 220, 60, mousePos);
+        view.hoverEndTurnButton = CheckButtonClick(750, 960, 420, 60, mousePos);
+        view.hoverPauseButton = CheckButtonClick(SCREEN_W - 180, 10, 160, 50, mousePos);
+
+        bool hoverSelf = false;
+        bool hoverEnemy = false;
+        if (view.canAttack && view.hasOperator && activeActor && activeTarget) {
+            if (CheckButtonClick(600, 960, 220, 60, mousePos)) hoverSelf = true;
+            else if (CheckButtonClick(850, 960, 220, 60, mousePos)) hoverEnemy = true;
+            else if (CheckButtonClick(40, 100, 500, 650, mousePos)) {
+                if (view.is1PTurn) hoverSelf = true; else hoverEnemy = true;
+            }
+            else if (CheckButtonClick(1380, 100, 500, 650, mousePos)) {
+                if (view.is1PTurn) hoverEnemy = true; else hoverSelf = true;
+            }
+            else if (m_hoverGrid == actorPos) hoverSelf = true;
+            else if (m_hoverGrid == targetPos) hoverEnemy = true;
+        }
+
+        int calcLeft = 0;
+        int calcRight = 0;
+        char calcOp = '\0';
+
+        if (isActionPhase && view.canAttack && view.hasOperator && activeActor && activeTarget) {
+            view.calculation.visible = true;
+            calcLeft = activeActor->GetNumber();
+            calcRight = activeTarget->GetNumber();
+            calcOp = activeActor->GetOp();
+        }
+        else if (isMovePhase && movePreview && previewNextToEnemy && activeActor && activeTarget && previewOp != '\0') {
+            view.calculation.visible = true;
+            view.calculation.movePreview = true;
+            calcLeft = previewNumber;
+            calcRight = activeTarget->GetNumber();
+            calcOp = previewOp;
+            view.calculation.willGetNewOperator = (activeActor->GetOp() != previewOp);
+        }
+
+        if (view.calculation.visible) {
+            view.calculation.leftNumber = calcLeft;
+            view.calculation.rightNumber = calcRight;
+            view.calculation.op = calcOp;
+            view.calculation.hoverSelf = hoverSelf;
+            view.calculation.hoverEnemy = hoverEnemy;
+
+            BattleCalculationResult calc = m_rule.CalculateBattleResult(calcLeft, calcRight, calcOp);
+            view.calculation.intResult = calc.intValue;
+            view.calculation.fractionResult = { calc.fraction.n, calc.fraction.d };
+            view.calculation.cleanDivide = calc.cleanDivide;
+
+            if (calcOp == '/' && calcRight != 0) {
+                view.calculation.createsWarp = true;
+                view.calculation.warpGrid = m_rule.GetWarpGrid(calcLeft, calcRight);
+                view.calculation.warpDisplay = { calcLeft, calcRight };
+            }
+
+            int selfNumber = activeActor->GetNumber();
+            int selfStocks = activeActor->GetStocks();
+            if (view.calculation.movePreview) {
+                selfNumber = previewNumber;
+                selfStocks = previewStocks;
+            }
+
+            Fraction selfScore = m_rule.IsRoundBattle()
+                ? (activeIs1P ? m_p1RoundScore : m_p2RoundScore)
+                : (activeIs1P ? m_p1ZeroOneScore : m_p2ZeroOneScore);
+            Fraction enemyScore = m_rule.IsRoundBattle()
+                ? (activeIs1P ? m_p2RoundScore : m_p1RoundScore)
+                : (activeIs1P ? m_p2ZeroOneScore : m_p1ZeroOneScore);
+
+            BattleSimulatedUnitState selfState;
+            BattleSimulatedUnitState enemyState;
+            if (m_rule.IsClassic()) {
+                selfState = m_rule.SimulateClassicResult(selfNumber, selfStocks, activeActor->GetMaxStocks(), calc.intValue, calcOp, calc.cleanDivide);
+                enemyState = m_rule.SimulateClassicResult(activeTarget->GetNumber(), activeTarget->GetStocks(), activeTarget->GetMaxStocks(), calc.intValue, calcOp, calc.cleanDivide);
+            }
+            else if (m_rule.IsRoundBattle()) {
+                selfState = m_rule.SimulateRoundBattleResult(selfNumber, selfStocks, selfScore, m_roundTarget, calc.intValue, calc.fraction, calcOp, calc.cleanDivide);
+                enemyState = m_rule.SimulateRoundBattleResult(activeTarget->GetNumber(), activeTarget->GetStocks(), enemyScore, m_roundTarget, calc.intValue, calc.fraction, calcOp, calc.cleanDivide);
+            }
+            else {
+                selfState = m_rule.SimulateZeroOneResult(selfNumber, selfStocks, selfScore, calc.intValue, calc.fraction, calcOp, calc.cleanDivide);
+                enemyState = m_rule.SimulateZeroOneResult(activeTarget->GetNumber(), activeTarget->GetStocks(), enemyScore, calc.intValue, calc.fraction, calcOp, calc.cleanDivide);
+            }
+
+            auto toView = [](const BattleSimulatedUnitState& src) {
+                BattleTargetResultView dst;
+                dst.valid = src.valid;
+                dst.defeated = src.defeated;
+                dst.number = src.number;
+                dst.stocks = src.stocks;
+                dst.stockDelta = src.stockDelta;
+                dst.hasScore = src.hasScore;
+                dst.score = { src.score.n, src.score.d };
+                return dst;
+                };
+            view.calculation.selfResult = toView(selfState);
+            view.calculation.enemyResult = toView(enemyState);
+
+            // 行動フェーズで反映先にカーソルを置いた場合、左右カードにも同じ予測値を表示する。
+            if (!view.calculation.movePreview && (hoverSelf || hoverEnemy)) {
+                bool targetIs1P = hoverSelf ? activeIs1P : !activeIs1P;
+                const BattleSimulatedUnitState& selected = hoverSelf ? selfState : enemyState;
+                BattleUnitView& unitView = targetIs1P ? view.p1 : view.p2;
+
+                if (selected.valid) {
+                    unitView.hasPowerPreview = true;
+                    unitView.previewNumber = selected.number;
+                    unitView.previewStocks = selected.stocks;
+                    unitView.previewDefeated = selected.defeated;
+                    if (!selected.defeated && selected.number >= 1 && selected.number <= 9) {
+                        unitView.previewMoveDistance = m_rule.GetMoveDistance(selected.number);
+                        unitView.previewMoveDirectionDots = m_rule.BuildBaseMoveDirectionDots(selected.number);
+                    }
+                    if (selected.hasScore) {
+                        unitView.hasScorePreview = true;
+                        unitView.previewScore = { selected.score.n, selected.score.d };
+                    }
+                }
+            }
+        }
+
+        view.ruleLines = m_rule.GetRuleLines();
+
+        return view;
+    }
+
 
     void BattleMaster::HandleMoveInput(UnitBase& activeUnit, Phase nextPhase) {
         if (activeUnit.IsMoving()) return;
@@ -386,7 +1125,6 @@ namespace App {
         if (actor.IsMoving()) return;
 
         const bool is1P = (&actor == m_player.get());
-        Phase nextTurnPhase = is1P ? Phase::P2_Move : Phase::P1_Move;
 
         IntVector2 pos = actor.GetGridPos();
         char pickedItem = m_mapGrid.PickUpItem(pos.x, pos.y);
@@ -405,7 +1143,7 @@ namespace App {
         }
 
         IntVector2 targetPos = targetUnit.GetGridPos();
-        bool canAttack = (std::abs(pos.x - targetPos.x) + std::abs(pos.y - targetPos.y) == 1);
+        bool canAttack = m_rule.IsAdjacent(pos, targetPos);
         bool hasOp = (actor.GetOp() != '\0');
 
         if (!canAttack || !hasOp) {
@@ -487,12 +1225,15 @@ namespace App {
         }
     }
 
-    void BattleMaster::ExecuteAIAction(UnitBase* me, UnitBase* opp, bool is1P) {
-        if (!me || !opp || me->IsMoving()) return;
 
-        std::string myName = is1P ? "1P" : "2P";
-        IntVector2 myP = me->GetGridPos();
-        char pickedItem = m_mapGrid.PickUpItem(myP.x, myP.y);
+
+
+    void BattleMaster::ExecuteAIAction(UnitBase* me, UnitBase* opp, bool is1P) {
+        if (!me || !opp || me->IsMoving() || !m_ai) return;
+
+        const std::string myName = is1P ? "1P" : "2P";
+        const IntVector2 myPos = me->GetGridPos();
+        const char pickedItem = m_mapGrid.PickUpItem(myPos.x, myPos.y);
 
         if (pickedItem != '\0') {
             me->SetOp(pickedItem);
@@ -507,89 +1248,24 @@ namespace App {
             else if (pickedItem == '/') ProceduralAudio::GetInstance().PlayPowerSE(9);
         }
 
-        IntVector2 oppP = opp->GetGridPos();
-        bool canAttack = (std::abs(myP.x - oppP.x) + std::abs(myP.y - oppP.y) == 1);
-        char myOp = me->GetOp();
+        BattleAI::ActionContext context;
+        context.me = me;
+        context.enemy = opp;
+        context.is1P = is1P;
+        context.rule = &m_rule;
+        context.p1Score = m_rule.IsRoundBattle() ? m_p1RoundScore : m_p1ZeroOneScore;
+        context.p2Score = m_rule.IsRoundBattle() ? m_p2RoundScore : m_p2ZeroOneScore;
+        context.roundTarget = m_roundTarget;
 
-        if (canAttack && myOp != '\0') {
-            int aNum = me->GetNumber();
-            int tNum = opp->GetNumber();
-            int intRes = 0; Fraction resFrac(0); bool isCleanDivide = true;
+        const BattleAI::ActionTarget target = m_ai->ChooseActionTarget(context);
 
-            if (myOp == '+') { intRes = aNum + tNum; resFrac = Fraction(intRes); }
-            else if (myOp == '-') { intRes = aNum - tNum; resFrac = Fraction(intRes); }
-            else if (myOp == '*') { intRes = aNum * tNum; resFrac = Fraction(intRes); }
-            else if (myOp == '/') {
-                if (tNum != 0 && aNum % tNum == 0) { intRes = aNum / tNum; resFrac = Fraction(intRes); }
-                else { intRes = 0; resFrac = Fraction(0); isCleanDivide = false; }
-            }
-
-            bool targetMeIsBetter = true;
-
-            if (m_ruleMode == RuleMode::ZERO_ONE) {
-                if (myOp == '/') targetMeIsBetter = true;
-                else {
-                    Fraction goal(m_targetScore);
-                    Fraction myScoreNow = is1P ? m_p1ZeroOneScore : m_p2ZeroOneScore;
-                    Fraction enScoreNow = is1P ? m_p2ZeroOneScore : m_p1ZeroOneScore;
-
-                    Fraction nextMy = myScoreNow + resFrac;
-                    if (nextMy > goal) nextMy = goal - (nextMy - goal);
-
-                    Fraction nextEn = enScoreNow + resFrac;
-                    if (nextEn > goal) nextEn = goal - (nextEn - goal);
-
-                    long long myDistNow = std::abs((goal - myScoreNow).n / (goal - myScoreNow).d);
-                    long long enDistNow = std::abs((goal - enScoreNow).n / (goal - enScoreNow).d);
-                    long long myDistNext = std::abs((goal - nextMy).n / (goal - nextMy).d);
-                    long long enDistNext = std::abs((goal - nextEn).n / (goal - nextEn).d);
-
-                    int scoreMe = (myDistNow - myDistNext) * 100;
-                    if (nextMy == goal) scoreMe = 1000000;
-
-                    int scoreEn = (enDistNext - enDistNow) * 100;
-                    if (nextEn == goal) scoreEn = -1000000;
-
-                    targetMeIsBetter = (scoreMe >= scoreEn);
-                }
-            }
-            else {
-                if (myOp == '/') targetMeIsBetter = true;
-                else {
-                    auto calcDmg = [](int currentHp, int currentStocks, int val, int& outHp, int& outStocks) {
-                        outHp = val;
-                        outStocks = currentStocks;
-                        if (outHp <= 0) {
-                            outStocks -= 1;
-                            while (outHp <= 0) {
-                                outHp += 9;
-                            }
-                        }
-                        else if (outHp > 9) {
-                            outStocks += 1;
-                            while (outHp > 9) {
-                                outHp -= 9;
-                            }
-                        }
-                        };
-
-                    int myHpNext, myStNext, enHpNext, enStNext;
-                    calcDmg(aNum, me->GetStocks(), intRes, myHpNext, myStNext);
-                    calcDmg(tNum, opp->GetStocks(), intRes, enHpNext, enStNext);
-
-                    int scoreMe = (myStNext - me->GetStocks()) * 10000 + (myHpNext - aNum) * 1000;
-                    if (myStNext <= 0 && myHpNext <= 0) scoreMe = -1000000;
-
-                    int scoreEn = (opp->GetStocks() - enStNext) * 15000 + (tNum - enHpNext) * 500;
-                    if (enStNext <= 0 && enHpNext <= 0) scoreEn = 10000000;
-
-                    targetMeIsBetter = (scoreMe >= scoreEn);
-                }
-            }
-
+        if (target == BattleAI::ActionTarget::SELF) {
             ProceduralAudio::GetInstance().PlayPowerSE(6);
-            if (targetMeIsBetter) ExecuteBattle(*me, *opp, *me);
-            else ExecuteBattle(*me, *opp, *opp);
+            ExecuteBattle(*me, *opp, *me);
+        }
+        else if (target == BattleAI::ActionTarget::OPPONENT) {
+            ProceduralAudio::GetInstance().PlayPowerSE(6);
+            ExecuteBattle(*me, *opp, *opp);
         }
         else {
             AddLog("【待機】 " + myName + " は行動を完了");
@@ -598,12 +1274,8 @@ namespace App {
 
         FinishActionPhase(is1P);
 
-        if (is1P) {
-            m_playerAIStarted = false;
-        }
-        else {
-            m_enemyAIStarted = false;
-        }
+        if (is1P) m_playerAIStarted = false;
+        else m_enemyAIStarted = false;
     }
 
     void BattleMaster::Update() {
@@ -620,18 +1292,19 @@ namespace App {
                     int finalTimeMs = GetNowCount() - m_startTime;
                     int turns = m_mapGrid.GetTotalTurns();
 
-                    BattleStats p1Stats = { turns, finalTimeMs, m_p1TotalMoves, m_p1TotalOps, m_p1MaxDamage };
-                    BattleStats p2Stats = { turns, finalTimeMs, m_p2TotalMoves, m_p2TotalOps, m_p2MaxDamage };
+                    BattleStats p1Stats = {
+                        turns, finalTimeMs, m_p1TotalMoves, m_p1TotalOps, m_p1MaxDamage,
+                        m_player ? m_player->GetMaxStocks() : 0
+                    };
+                    BattleStats p2Stats = {
+                        turns, finalTimeMs, m_p2TotalMoves, m_p2TotalOps, m_p2MaxDamage,
+                        m_enemy ? m_enemy->GetMaxStocks() : 0
+                    };
 
-                    int winner = 0;
-                    if (m_ruleMode == RuleMode::ZERO_ONE) {
-                        Fraction goal(m_targetScore);
-                        if (m_p1ZeroOneScore == goal) winner = 1;
-                        else if (m_p2ZeroOneScore == goal) winner = 2;
-                    }
-                    else {
-                        winner = m_is1PWinner ? 1 : 2;
-                    }
+                    const int winner = m_rule.IsP1Winner(
+                        m_p1ZeroOneScore,
+                        m_p2ZeroOneScore,
+                        m_is1PWinner) ? 1 : 2;
 
                     auto* sm = SceneManager::GetInstance();
                     sm->SetBattleResult(winner, p1Stats, p2Stats);
@@ -641,19 +1314,10 @@ namespace App {
             return;
         }
 
-        if (m_ruleMode == RuleMode::ZERO_ONE) {
+        if (m_rule.IsZeroOne()) {
             if (m_player && m_player->GetStocks() < m_player->GetMaxStocks()) m_player->AddStocks(m_player->GetMaxStocks() - m_player->GetStocks());
             if (m_enemy && m_enemy->GetStocks() < m_enemy->GetMaxStocks()) m_enemy->AddStocks(m_enemy->GetMaxStocks() - m_enemy->GetStocks());
         }
-
-        auto updateCursor = [](float& currentX, int targetNum) {
-            float targetX = 40.0f + (targetNum - 1) * 48.0f;
-            if (currentX == 0.0f) currentX = targetX;
-            currentX += (targetX - currentX) * 0.2f;
-            };
-
-        if (m_player) updateCursor(m_uiCursorX_1P, m_player->GetNumber());
-        if (m_enemy)  updateCursor(m_uiCursorX_2P, m_enemy->GetNumber());
 
         auto& input = InputManager::GetInstance();
         if (m_player) m_player->Update();
@@ -672,18 +1336,26 @@ namespace App {
             m_ui->Update(m_effectIntensity, p1Num, p2Num);
         }
 
-        m_shaderTime += 0.0016f + (0.005f * m_effectIntensity);
+        // ラウンドバトルのセットアップ中は専用進行だけを更新し、
+        // 旧Classic/Countのターン処理へは入れない。
+        if (m_rule.IsRoundBattle() && m_roundPhase != RoundPhase::BATTLE) {
+            UpdateRoundSetup();
+            return;
+        }
+
         if (m_effectIntensity > 0.0f) m_effectIntensity -= 0.05f;
 
-        if (m_ruleMode == RuleMode::ZERO_ONE) {
-            float target1P = (float)(m_p1ZeroOneScore.n / m_p1ZeroOneScore.d);
-            float target2P = (float)(m_p2ZeroOneScore.n / m_p2ZeroOneScore.d);
+        if (m_rule.IsZeroOne() || m_rule.IsRoundBattle()) {
+            const Fraction& score1P = m_rule.IsRoundBattle() ? m_p1RoundScore : m_p1ZeroOneScore;
+            const Fraction& score2P = m_rule.IsRoundBattle() ? m_p2RoundScore : m_p2ZeroOneScore;
+            const float target1P = static_cast<float>(score1P.n) / static_cast<float>(score1P.d);
+            const float target2P = static_cast<float>(score2P.n) / static_cast<float>(score2P.d);
 
             m_p1DisplayScore += (target1P - m_p1DisplayScore) * 0.15f;
             m_p2DisplayScore += (target2P - m_p2DisplayScore) * 0.15f;
 
-            if (std::abs(target1P - m_p1DisplayScore) < 0.5f) m_p1DisplayScore = target1P;
-            if (std::abs(target2P - m_p2DisplayScore) < 0.5f) m_p2DisplayScore = target2P;
+            if (std::abs(target1P - m_p1DisplayScore) < 0.01f) m_p1DisplayScore = target1P;
+            if (std::abs(target2P - m_p2DisplayScore) < 0.01f) m_p2DisplayScore = target2P;
         }
 
         switch (m_currentPhase) {
@@ -742,6 +1414,10 @@ namespace App {
             }
             else HandleActionInput(*m_enemy, *m_player);
             break;
+
+        case Phase::FINISH:
+            // FINISH は Update 冒頭で処理して return しているため、通常ここには到達しない。
+            break;
         }
 
         int pauseBtnW = 160;
@@ -763,10 +1439,13 @@ namespace App {
         }
 
         bool isDisplayCaughtUp = true;
-        if (m_ruleMode == RuleMode::ZERO_ONE) {
-            float target1P = (float)(m_p1ZeroOneScore.n / m_p1ZeroOneScore.d);
-            float target2P = (float)(m_p2ZeroOneScore.n / m_p2ZeroOneScore.d);
-            isDisplayCaughtUp = (m_p1DisplayScore == target1P) && (m_p2DisplayScore == target2P);
+        if (m_rule.IsZeroOne() || m_rule.IsRoundBattle()) {
+            const Fraction& score1P = m_rule.IsRoundBattle() ? m_p1RoundScore : m_p1ZeroOneScore;
+            const Fraction& score2P = m_rule.IsRoundBattle() ? m_p2RoundScore : m_p2ZeroOneScore;
+            const float target1P = static_cast<float>(score1P.n) / static_cast<float>(score1P.d);
+            const float target2P = static_cast<float>(score2P.n) / static_cast<float>(score2P.d);
+            isDisplayCaughtUp = std::abs(m_p1DisplayScore - target1P) < 0.01f &&
+                std::abs(m_p2DisplayScore - target2P) < 0.01f;
         }
 
         if (IsGameOver() && isDisplayCaughtUp && m_currentPhase != Phase::FINISH) {
@@ -778,25 +1457,27 @@ namespace App {
         }
     }
 
+
+
+
+
+
+
+
     void BattleMaster::PerformAIMove(UnitBase* me, IntVector2 bestTarget, int selectedCost, bool is1P) {
         if (!me) return;
-        IntVector2 myPos = me->GetGridPos();
+
+        const IntVector2 myPos = me->GetGridPos();
         std::queue<Vector2> screenPath;
-        std::string myName = is1P ? "1P" : "2P";
+        const std::string myName = is1P ? "1P" : "2P";
 
-        bool isStay = (bestTarget == myPos);
-        if (isStay && !me->HasWarpNode(bestTarget)) {
-            if (is1P) g_aiStayCount1P++; else g_aiStayCount2P++;
-        }
-        else {
-            if (is1P) g_aiStayCount1P = 0; else g_aiStayCount2P = 0;
-        }
-
+        const bool isStay = (bestTarget == myPos);
         int actualCost = isStay ? 1 : selectedCost;
         if (me->HasWarpNode(bestTarget)) actualCost = 1;
 
         if (me->HasWarpNode(bestTarget)) {
-            AddLog("【跳躍】 " + myName + " がワープを起動し (" + std::to_string(bestTarget.x + 1) + "," + std::to_string(9 - bestTarget.y) + ") に移動！");
+            AddLog("【跳躍】 " + myName + " がワープを起動し (" +
+                std::to_string(bestTarget.x + 1) + "," + std::to_string(9 - bestTarget.y) + ") に移動！");
             ProceduralAudio::GetInstance().PlayPowerSE(8);
         }
         else if (isStay) {
@@ -804,270 +1485,76 @@ namespace App {
             ProceduralAudio::GetInstance().PlayPowerSE(1);
         }
         else {
-            AddLog("【移動】 " + myName + " が (" + std::to_string(bestTarget.x + 1) + "," + std::to_string(9 - bestTarget.y) + ") へ移動");
+            AddLog("【移動】 " + myName + " が (" +
+                std::to_string(bestTarget.x + 1) + "," + std::to_string(9 - bestTarget.y) + ") へ移動");
             ProceduralAudio::GetInstance().PlayPowerSE(5);
         }
 
-        int dx = std::abs(bestTarget.x - myPos.x);
-        int dy = std::abs(bestTarget.y - myPos.y);
-        if (is1P) m_p1TotalMoves += std::max(dx, dy); else m_p2TotalMoves += std::max(dx, dy);
+        const int dx = std::abs(bestTarget.x - myPos.x);
+        const int dy = std::abs(bestTarget.y - myPos.y);
+        if (is1P) m_p1TotalMoves += std::max(dx, dy);
+        else m_p2TotalMoves += std::max(dx, dy);
 
         if (me->HasWarpNode(bestTarget) || isStay || (dx != dy && dx != 0 && dy != 0)) {
             screenPath.push(m_mapGrid.GetCellCenter(bestTarget.x, bestTarget.y));
         }
         else {
-            int stepX = (bestTarget.x > myPos.x) ? 1 : (bestTarget.x < myPos.x) ? -1 : 0;
-            int stepY = (bestTarget.y > myPos.y) ? 1 : (bestTarget.y < myPos.y) ? -1 : 0;
-            IntVector2 curr = myPos;
-            int maxSteps = std::max(dx, dy);
+            const int stepX = (bestTarget.x > myPos.x) ? 1 : (bestTarget.x < myPos.x) ? -1 : 0;
+            const int stepY = (bestTarget.y > myPos.y) ? 1 : (bestTarget.y < myPos.y) ? -1 : 0;
+            IntVector2 current = myPos;
+            const int maxSteps = std::max(dx, dy);
+
             for (int i = 0; i < maxSteps; ++i) {
-                curr.x += stepX; curr.y += stepY;
-                screenPath.push(m_mapGrid.GetCellCenter(curr.x, curr.y));
+                current.x += stepX;
+                current.y += stepY;
+                screenPath.push(m_mapGrid.GetCellCenter(current.x, current.y));
             }
         }
+
         AddPowerWithBattery(*me, -actualCost, "移動");
         me->StartMove(bestTarget, screenPath);
 
-        if (is1P) m_playerAIStarted = true; else m_enemyAIStarted = true;
-    }
-
-    int BattleMaster::EvaluateBoard(const UnitBase& me, int myVirtualNumber, const UnitBase& enemy, IntVector2 targetPos, bool is1P) const {
-        int score = 0;
-        IntVector2 currentPos = me.GetGridPos();
-        bool isStay = (targetPos == currentPos);
-        IntVector2 ePos = enemy.GetGridPos();
-        bool canAttack = (std::abs(targetPos.x - ePos.x) + std::abs(targetPos.y - ePos.y) == 1);
-
-        int moveCost = isStay ? 1 : std::max(std::abs(targetPos.x - currentPos.x), std::abs(targetPos.y - currentPos.y));
-        if (me.HasWarpNode(targetPos)) moveCost = 1;
-
-        int predictedStocks = me.GetStocks();
-        int predictedHp = me.GetNumber() - moveCost;
-        while (predictedHp <= 0) {
-            predictedStocks--;
-            predictedHp += 9;
-        }
-
-        if (predictedStocks <= 0 && predictedHp <= 0) {
-            score -= 9000000;
-        }
-
-        int currentStayCount = is1P ? g_aiStayCount1P : g_aiStayCount2P;
-        if (isStay) {
-            score -= (currentStayCount * 20000);
-            if (!canAttack) score -= 2000;
-        }
-        if (targetPos.x == 0 || targetPos.x == 8 || targetPos.y == 0 || targetPos.y == 8) score -= 50;
-
-        char virtualOp = me.GetOp();
-        char itemHere = m_mapGrid.GetItemAt(targetPos.x, targetPos.y);
-        if (itemHere != '\0') virtualOp = itemHere;
-
-        if (m_ruleMode == RuleMode::ZERO_ONE) {
-            Fraction goal(m_targetScore);
-            Fraction myScoreNow = is1P ? m_p1ZeroOneScore : m_p2ZeroOneScore;
-            Fraction enScoreNow = is1P ? m_p2ZeroOneScore : m_p1ZeroOneScore;
-            long long myDistNow = std::abs((goal - myScoreNow).n / (goal - myScoreNow).d);
-            long long enDistNow = std::abs((goal - enScoreNow).n / (goal - enScoreNow).d);
-
-            if (me.GetOp() == '\0') {
-                int bestItemScore = -99999;
-                for (int ix = 0; ix < 9; ++ix) {
-                    for (int iy = 0; iy < 9; ++iy) {
-                        char item = m_mapGrid.GetItemAt(ix, iy);
-                        if (item != '\0') {
-                            int distToItem = std::abs(targetPos.x - ix) + std::abs(targetPos.y - iy);
-                            int itemVal = (20 - distToItem) * 300;
-
-                            int eNum = enemy.GetNumber();
-                            int hypRes = 0; bool isClean = true;
-                            if (item == '+') hypRes = predictedHp + eNum;
-                            else if (item == '-') hypRes = predictedHp - eNum;
-                            else if (item == '*') hypRes = predictedHp * eNum;
-                            else if (item == '/') {
-                                if (eNum != 0 && predictedHp % eNum == 0) hypRes = predictedHp / eNum;
-                                else isClean = false;
-                            }
-
-                            if (item == '/') {
-                                if (isClean) {
-                                    itemVal += 1500;
-                                }
-                                else {
-                                    if (itemVal > bestItemScore) bestItemScore = itemVal;
-                                    continue;
-                                }
-                            }
-
-                            Fraction resF(hypRes);
-                            Fraction nextMy = myScoreNow + resF; if (nextMy > goal) nextMy = goal - (nextMy - goal);
-                            long long myDistNext = std::abs((goal - nextMy).n / (goal - nextMy).d);
-                            int benefitMe = (int)(myDistNow - myDistNext) * 200;
-                            if (nextMy == goal) benefitMe = 100000;
-
-                            Fraction nextEn = enScoreNow + resF; if (nextEn > goal) nextEn = goal - (nextEn - goal);
-                            long long enDistNext = std::abs((goal - nextEn).n / (goal - nextEn).d);
-                            int benefitEn = (int)(enDistNext - enDistNow) * 200;
-                            if (nextEn == goal) benefitEn = -100000;
-
-                            itemVal += std::max(benefitMe, benefitEn);
-                            if (itemVal > bestItemScore) bestItemScore = itemVal;
-                        }
-                    }
-                }
-                score += (bestItemScore != -99999) ? bestItemScore : 0;
-            }
-
-            if (virtualOp != '\0') {
-                int distToEnemy = std::abs(targetPos.x - ePos.x) + std::abs(targetPos.y - ePos.y);
-                score += (20 - distToEnemy) * 500;
-
-                if (canAttack) {
-                    int eNum = enemy.GetNumber();
-                    int res = 0; bool isClean = true;
-                    if (virtualOp == '+')      res = predictedHp + eNum;
-                    else if (virtualOp == '-') res = predictedHp - eNum;
-                    else if (virtualOp == '*') res = predictedHp * eNum;
-                    else if (virtualOp == '/') {
-                        if (eNum != 0 && predictedHp % eNum == 0) res = predictedHp / eNum;
-                        else isClean = false;
-                    }
-
-                    if (virtualOp != '/' || isClean) {
-                        Fraction resF(res);
-                        Fraction nextMy = myScoreNow + resF; if (nextMy > goal) nextMy = goal - (nextMy - goal);
-                        Fraction nextEn = enScoreNow + resF; if (nextEn > goal) nextEn = goal - (nextEn - goal);
-
-                        long long myDistNext = std::abs((goal - nextMy).n / (goal - nextMy).d);
-                        long long enDistNext = std::abs((goal - nextEn).n / (goal - nextEn).d);
-
-                        int gainMe = (int)(myDistNow - myDistNext) * 200; if (nextMy == goal) gainMe = 1000000;
-                        int gainEn = (int)(enDistNext - enDistNow) * 200; if (nextEn == goal) gainEn = -1000000;
-
-                        score += std::max(gainMe, gainEn);
-                    }
-                    if (virtualOp == '/' && isClean) score += 2000;
-                }
-            }
-            if (canAttack && virtualOp == '\0' && enemy.GetOp() != '\0') score -= 5000;
-        }
-        else {
-            score += predictedStocks * 20000;
-            score -= enemy.GetStocks() * 20000;
-            score += predictedHp * 100;
-
-            if (me.GetOp() == '\0') {
-                int bestItemScore = -99999;
-                for (int ix = 0; ix < 9; ++ix) {
-                    for (int iy = 0; iy < 9; ++iy) {
-                        char item = m_mapGrid.GetItemAt(ix, iy);
-                        if (item != '\0') {
-                            int distToItem = std::abs(targetPos.x - ix) + std::abs(targetPos.y - iy);
-                            int itemVal = (20 - distToItem) * 500;
-                            if (item == '-') itemVal += 5000;
-                            else if (item == '*') itemVal += 3000;
-
-                            if (predictedStocks == 0 && predictedHp <= 3 && item == '+') itemVal += 8000;
-
-                            if (itemVal > bestItemScore) bestItemScore = itemVal;
-                        }
-                    }
-                }
-                score += (bestItemScore != -99999) ? bestItemScore : 0;
-            }
-
-            if (virtualOp != '\0') {
-                int distToEnemy = std::abs(targetPos.x - ePos.x) + std::abs(targetPos.y - ePos.y);
-                score += (20 - distToEnemy) * 1000;
-
-                if (canAttack) {
-                    int eNum = enemy.GetNumber();
-                    int intRes = 0; bool isClean = true;
-                    if (virtualOp == '+') intRes = predictedHp + eNum;
-                    else if (virtualOp == '-') intRes = predictedHp - eNum;
-                    else if (virtualOp == '*') intRes = predictedHp * eNum;
-                    else if (virtualOp == '/') {
-                        if (eNum != 0 && predictedHp % eNum == 0) intRes = predictedHp / eNum;
-                        else isClean = false;
-                    }
-
-                    if (virtualOp == '/') {
-                        if (isClean) score += 2000;
-                        else score -= 1000;
-                    }
-                    else {
-                        auto calcDmg = [](int currentHp, int currentStocks, int val, int& outHp, int& outStocks) {
-                            outHp = val; outStocks = currentStocks;
-                            if (outHp <= 0) { outStocks -= 1; while (outHp <= 0) outHp += 9; }
-                            else if (outHp > 9) { outStocks += 1; while (outHp > 9) outHp -= 9; }
-                            };
-
-                        int myHpNext, myStNext, enHpNext, enStNext;
-                        calcDmg(predictedHp, predictedStocks, intRes, myHpNext, myStNext);
-                        calcDmg(eNum, enemy.GetStocks(), intRes, enHpNext, enStNext);
-
-                        int scoreMe = (myStNext - predictedStocks) * 10000 + (myHpNext - predictedHp) * 1000;
-                        if (myStNext <= 0 && myHpNext <= 0) scoreMe -= 5000000;
-
-                        int scoreEn = (enemy.GetStocks() - enStNext) * 15000 + (eNum - enHpNext) * 500;
-                        if (enStNext <= 0 && enHpNext <= 0) scoreEn += 10000000;
-
-                        score += std::max(scoreMe, scoreEn);
-                    }
-                }
-            }
-            if (canAttack && virtualOp == '\0' && enemy.GetOp() != '\0') score -= 5000;
-        }
-
-        return score;
+        if (is1P) m_playerAIStarted = true;
+        else m_enemyAIStarted = true;
     }
 
     void BattleMaster::ExecuteAI(UnitBase* me, UnitBase* opp, bool is1P) {
-        if (!me) return;
+        if (!me || !opp || !m_ai) return;
 
-        IntVector2 myPos = me->GetGridPos();
-        int currentNum = me->GetNumber();
-        char currentOp = me->GetOp();
+        BattleAI::MoveContext context;
+        context.map = &m_mapGrid;
+        context.me = me;
+        context.enemy = opp;
+        context.is1P = is1P;
+        context.rule = &m_rule;
+        context.p1Score = m_rule.IsRoundBattle() ? m_p1RoundScore : m_p1ZeroOneScore;
+        context.p2Score = m_rule.IsRoundBattle() ? m_p2RoundScore : m_p2ZeroOneScore;
+        context.roundTarget = m_roundTarget;
 
-        IntVector2 bestMove = myPos;
-        int bestScore = -9999999;
-        int selectedCost = 1;
+        const IntVector2 myPos = me->GetGridPos();
+        const int currentNumber = me->GetNumber();
+        const char currentOp = me->GetOp();
 
-        std::uniform_int_distribution<int> noiseDist(-500, 500);
-
-        for (int x = 0; x < 9; ++x) {
-            for (int y = 0; y < 9; ++y) {
-                IntVector2 target{ x, y };
-                int cost = 0;
+        for (int x = 0; x < m_mapGrid.GetWidth(); ++x) {
+            for (int y = 0; y < m_mapGrid.GetHeight(); ++y) {
+                const IntVector2 target{ x, y };
+                int cost = 1;
 
                 bool canGo = (target == myPos);
                 if (!canGo) {
-                    canGo = CanMove(currentNum, currentOp, myPos, target, cost);
-                }
-                else {
-                    cost = 1;
+                    canGo = CanMove(currentNumber, currentOp, myPos, target, cost);
                 }
 
                 if (canGo) {
-                    int virtualNextNum = currentNum - cost;
-                    while (virtualNextNum <= 0) virtualNextNum += 9;
-
-                    me->StartMove(target, std::queue<Vector2>());
-                    int eval = EvaluateBoard(*me, virtualNextNum, *opp, target, is1P);
-
-                    int noise = noiseDist(g_rng);
-                    eval += noise;
-
-                    if (eval > bestScore) {
-                        bestScore = eval;
-                        bestMove = target;
-                        selectedCost = cost;
-                    }
-                    me->StartMove(myPos, std::queue<Vector2>());
+                    context.candidates.push_back({ target, cost });
                 }
             }
         }
-        PerformAIMove(me, bestMove, selectedCost, is1P);
+
+        const BattleAI::MoveDecision decision = m_ai->ChooseMove(context);
+        if (decision.valid) {
+            PerformAIMove(me, decision.target, decision.cost, is1P);
+        }
     }
 
     void BattleMaster::ExecuteBattle(UnitBase& attacker, UnitBase& defender, UnitBase& target) {
@@ -1078,8 +1565,7 @@ namespace App {
         m_effectIntensity = 2.0f;
 
         if (aOp == '/' && dNum != 0) {
-            int wx = aNum - 1, wy = 9 - dNum;
-            IntVector2 nodePos{ wx, wy };
+            IntVector2 nodePos = m_rule.GetWarpGrid(aNum, dNum);
             if (!target.HasWarpNode(nodePos)) {
                 target.AddWarpNode(nodePos);
                 std::string targetName = (&target == m_player.get()) ? "1P" : "2P";
@@ -1088,33 +1574,17 @@ namespace App {
             }
         }
 
-        Fraction resFrac(0);
-        int intRes = 0;
-        bool isCleanDivide = true;
-
-        if (aOp == '+') { intRes = aNum + dNum; resFrac = Fraction(intRes); }
-        else if (aOp == '-') { intRes = aNum - dNum; resFrac = Fraction(intRes); }
-        else if (aOp == '*') { intRes = aNum * dNum; resFrac = Fraction(intRes); }
-        else if (aOp == '/') {
-            if (dNum != 0 && aNum % dNum == 0) {
-                intRes = aNum / dNum;
-                resFrac = Fraction(intRes);
-            }
-            else {
-                intRes = 0; resFrac = Fraction(0); isCleanDivide = false;
-            }
-        }
-
+        BattleCalculationResult calc = m_rule.CalculateBattleResult(aNum, dNum, aOp);
         std::string aName = (&attacker == m_player.get()) ? "1P" : "2P";
 
         if (aOp != '/') {
-            std::string eqStr = std::to_string(aNum) + " " + std::string(1, aOp) + " " + std::to_string(dNum) + " = " + std::to_string(intRes);
+            std::string eqStr = std::to_string(aNum) + " " + std::string(1, aOp) + " " + std::to_string(dNum) + " = " + std::to_string(calc.intValue);
             AddLog("【計算】 " + aName + " が計算を実行！ [ " + eqStr + " ]");
             ProceduralAudio::GetInstance().PlayPowerSE(4);
         }
         else {
-            if (isCleanDivide) {
-                std::string eqStr = std::to_string(aNum) + " / " + std::to_string(dNum) + " = " + std::to_string(intRes);
+            if (calc.cleanDivide) {
+                std::string eqStr = std::to_string(aNum) + " / " + std::to_string(dNum) + " = " + std::to_string(calc.intValue);
                 AddLog("【計算】 " + aName + " が計算を実行！ [ " + eqStr + " ] (割り切れた！)");
             }
             else {
@@ -1126,126 +1596,152 @@ namespace App {
         bool is1P = (&attacker == m_player.get());
         if (is1P) {
             m_p1TotalOps++;
-            if (std::abs(intRes) > m_p1MaxDamage) m_p1MaxDamage = std::abs(intRes);
+            if (std::abs(calc.intValue) > m_p1MaxDamage) m_p1MaxDamage = std::abs(calc.intValue);
         }
         else {
             m_p2TotalOps++;
-            if (std::abs(intRes) > m_p2MaxDamage) m_p2MaxDamage = std::abs(intRes);
+            if (std::abs(calc.intValue) > m_p2MaxDamage) m_p2MaxDamage = std::abs(calc.intValue);
         }
 
-        // ★ isCleanDivide を渡す
-        ApplyBattleResult(target, resFrac, intRes, aOp, isCleanDivide);
-        attacker.SetOp('\0');
-
+        ApplyBattleResult(target, calc.fraction, calc.intValue, aOp, calc.cleanDivide);
+        // ラウンドバトルではドラフトした演算子を継続保持する。
+        // 盤面演算子を拾った場合はその演算子へ置換されるため、常に戦術選択肢を残せる。
+        if (!m_rule.IsRoundBattle()) {
+            attacker.SetOp('\0');
+        }
         AddLog("----------------------------------------");
     }
 
     void BattleMaster::ApplyBattleResult(UnitBase& unit, const Fraction& resultFrac, int intRes, char op, bool isCleanDivide) {
         std::string targetName = (&unit == m_player.get()) ? "1P" : "2P";
 
-        if (m_ruleMode == RuleMode::ZERO_ONE) {
-            if (op != '/' || isCleanDivide) {
-                Fraction& currentScore = (&unit == m_player.get()) ? m_p1ZeroOneScore : m_p2ZeroOneScore;
-                Fraction goalScore(m_targetScore);
-                Fraction predictedScore = currentScore + resultFrac;
-                std::string prevScoreStr = currentScore.ToString();
+        if (m_rule.IsRoundBattle()) {
+            const bool targetIs1P = (&unit == m_player.get());
+            Fraction& currentScore = targetIs1P ? m_p1RoundScore : m_p2RoundScore;
+            BattleSimulatedUnitState next = m_rule.SimulateRoundBattleResult(
+                unit.GetNumber(), unit.GetStocks(), currentScore, m_roundTarget,
+                intRes, resultFrac, op, isCleanDivide);
 
-                if (predictedScore == goalScore) {
-                    currentScore = predictedScore;
-                    AddLog("【反映】 " + targetName + " のスコアに適用！ [" + prevScoreStr + " -> " + currentScore.ToString() + "]");
-                    AddLog("【ぴったり!!】 " + targetName + " が目標スコアにピッタリ到達！！");
-                }
-                else if (predictedScore > goalScore) {
-                    Fraction excess = predictedScore - goalScore;
-                    currentScore = goalScore - excess;
-                    AddLog("【反映】 " + targetName + " のスコアに適用！ [" + prevScoreStr + " -> " + predictedScore.ToString() + "]");
-                    AddLog("【オーバー】 目標を超過！スコアが [" + currentScore.ToString() + "] までバウンス");
-                }
-                else {
-                    currentScore = predictedScore;
-                    AddLog("【反映】 " + targetName + " のスコアに適用！ [" + prevScoreStr + " -> " + currentScore.ToString() + "]");
-                }
+            if (!next.valid) {
+                AddLog("【反映】 割り切れなかったため、ROUND SCORE / POWER は変化しません。");
+                return;
+            }
 
-                int cycleValue = (intRes - 1) % 9;
-                if (cycleValue < 0) cycleValue += 9;
-                int finalNum = cycleValue + 1;
+            const Fraction previous = currentScore;
+            const Fraction raw = previous + resultFrac;
+            currentScore = next.score;
+            const Fraction goal(m_roundTarget);
 
-                AddLog("【設定】 " + targetName + " のパワーが [" + std::to_string(finalNum) + "] に再設定されました。");
-                unit.SetNumber(finalNum);
-                ProceduralAudio::GetInstance().PlayPowerSE(finalNum);
+            if (raw > goal) {
+                AddLog("【SCORE】 " + targetName + " : " + previous.ToString() + " -> " + raw.ToString());
+                AddLog("【BOUNCE】 TARGET超過 -> " + currentScore.ToString());
             }
             else {
+                AddLog("【SCORE】 " + targetName + " : " + previous.ToString() + " -> " + currentScore.ToString());
+            }
+
+            unit.SetNumber(next.number);
+            AddLog("【POWER】 " + targetName + " -> " + std::to_string(next.number));
+            ProceduralAudio::GetInstance().PlayPowerSE(next.number);
+
+            if (m_rule.IsRoundTargetReached(currentScore, m_roundTarget)) {
+                AddLog("【TARGET JUST】 " + targetName + " が " + std::to_string(m_roundTarget) + " に到達！");
+                EndRound(targetIs1P ? 1 : 2);
+            }
+            return;
+        }
+
+        if (m_rule.IsZeroOne()) {
+            Fraction& currentScore = (&unit == m_player.get()) ? m_p1ZeroOneScore : m_p2ZeroOneScore;
+            BattleSimulatedUnitState next = m_rule.SimulateZeroOneResult(
+                unit.GetNumber(), unit.GetStocks(), currentScore, intRes, resultFrac, op, isCleanDivide);
+
+            if (!next.valid) {
                 AddLog("【反映】 割り切れなかったため、スコアの加算とパワーの変動はスキップされました。");
+                return;
             }
-        }
-        else { // CLASSIC
-            if (op != '/' || isCleanDivide) {
-                int newPower = intRes;
-                int stockChange = 0;
 
-                while (newPower <= 0) { stockChange--; newPower += 9; }
-                while (newPower > 9) { stockChange++; newPower -= 9; }
+            Fraction previous = currentScore;
+            Fraction predicted = previous + resultFrac;
+            Fraction goal(m_rule.GetTargetScore());
+            currentScore = next.score;
 
-                if (stockChange < 0) {
-                    // ★即死判定
-                    if (unit.GetStocks() + stockChange < 0) {
-                        SetClassicDefeat(unit, "エネルギー枯渇");
-                        ProceduralAudio::GetInstance().PlayErrorSE();
-                        return;
-                    }
-                    unit.AddStocks(stockChange);
-                    AddLog("【負荷】 " + targetName + " のバッテリーが " + std::to_string(std::abs(stockChange)) + " 減少！");
-                    ProceduralAudio::GetInstance().PlayErrorSE();
-                }
-                else if (stockChange > 0) {
-                    unit.AddStocks(stockChange);
-                    AddLog("【充電】 " + targetName + " のバッテリーが " + std::to_string(stockChange) + " 回復！");
-                    ProceduralAudio::GetInstance().PlayPowerSE(8);
-                }
-                else {
-                    AddLog("【適用】 " + targetName + " の数値を書き換え");
-                }
-
-                unit.SetNumber(newPower);
-                AddLog("【着地】 " + targetName + " のパワーは [" + std::to_string(newPower) + "] に変更されました");
-                ProceduralAudio::GetInstance().PlayPowerSE(newPower);
+            if (predicted == goal) {
+                AddLog("【反映】 " + targetName + " のスコアに適用！ [" + previous.ToString() + " -> " + currentScore.ToString() + "]");
+                AddLog("【ぴったり!!】 " + targetName + " が目標スコアにピッタリ到達！！");
+            }
+            else if (predicted > goal) {
+                AddLog("【反映】 " + targetName + " のスコアに適用！ [" + previous.ToString() + " -> " + predicted.ToString() + "]");
+                AddLog("【オーバー】 目標を超過！スコアが [" + currentScore.ToString() + "] までバウンス");
             }
             else {
-                AddLog("【反映】 割り切れなかったため、ダメージ処理はスキップされました。");
+                AddLog("【反映】 " + targetName + " のスコアに適用！ [" + previous.ToString() + " -> " + currentScore.ToString() + "]");
             }
+
+            AddLog("【設定】 " + targetName + " のパワーが [" + std::to_string(next.number) + "] に再設定されました。");
+            unit.SetNumber(next.number);
+            ProceduralAudio::GetInstance().PlayPowerSE(next.number);
+            return;
         }
+
+        BattleSimulatedUnitState next = m_rule.SimulateClassicResult(
+            unit.GetNumber(), unit.GetStocks(), unit.GetMaxStocks(), intRes, op, isCleanDivide);
+
+        if (!next.valid) {
+            AddLog("【反映】 割り切れなかったため、ダメージ処理はスキップされました。");
+            return;
+        }
+
+        if (next.defeated) {
+            SetClassicDefeat(unit, "エネルギー枯渇");
+            ProceduralAudio::GetInstance().PlayErrorSE();
+            return;
+        }
+
+        if (next.stockDelta < 0) {
+            unit.AddStocks(next.stockDelta);
+            AddLog("【負荷】 " + targetName + " のバッテリーが " + std::to_string(std::abs(next.stockDelta)) + " 減少！");
+            ProceduralAudio::GetInstance().PlayErrorSE();
+        }
+        else if (next.stockDelta > 0) {
+            unit.AddStocks(next.stockDelta);
+            AddLog("【充電】 " + targetName + " のバッテリーが " + std::to_string(next.stockDelta) + " 回復！");
+            ProceduralAudio::GetInstance().PlayPowerSE(8);
+        }
+        else {
+            AddLog("【適用】 " + targetName + " の数値を書き換え");
+        }
+
+        unit.SetNumber(next.number);
+        AddLog("【着地】 " + targetName + " のパワーは [" + std::to_string(next.number) + "] に変更されました");
+        ProceduralAudio::GetInstance().PlayPowerSE(next.number);
     }
 
     void BattleMaster::Draw() const {
-        if (m_ui) m_ui->Draw(*this);
+        if (!m_ui) return;
+        BattleViewData view = BuildBattleViewData();
+        m_ui->Draw(view);
     }
 
     bool BattleMaster::IsGameOver() const {
         if (!m_player || !m_enemy) return false;
-
-        if (m_ruleMode == RuleMode::ZERO_ONE) {
-            Fraction goal(m_targetScore);
-            return (m_p1ZeroOneScore == goal || m_p2ZeroOneScore == goal);
-        }
-        else {
-            return m_isBattleFinished;
-        }
+        return m_rule.IsGameOver(
+            m_p1ZeroOneScore,
+            m_p2ZeroOneScore,
+            m_isBattleFinished);
     }
 
     bool BattleMaster::IsPlayerWin() const {
         if (!m_player || !m_enemy) return false;
-        bool is1PWin = false;
 
-        if (m_ruleMode == RuleMode::ZERO_ONE) {
-            Fraction goal(m_targetScore);
-            is1PWin = (m_p1ZeroOneScore == goal);
-        }
-        else {
-            is1PWin = m_is1PWinner;
-        }
+        bool is1PWin = m_rule.IsP1Winner(
+            m_p1ZeroOneScore,
+            m_p2ZeroOneScore,
+            m_is1PWinner);
 
-        // ★ 判定条件をOFFLINE以外で統一
-        bool isOnline = (NetworkManager::GetInstance() != nullptr && NetworkManager::GetInstance()->GetState() != NetworkManager::State::OFFLINE);
+        // オンラインではクライアント視点に変換する。
+        bool isOnline = (NetworkManager::GetInstance() != nullptr &&
+            NetworkManager::GetInstance()->GetState() != NetworkManager::State::OFFLINE);
         if (isOnline) {
             bool isHost = NetworkManager::GetInstance()->IsHost();
             if (!isHost) return !is1PWin;
@@ -1259,24 +1755,41 @@ namespace App {
     }
 
     void BattleMaster::AddPowerWithBattery(UnitBase& unit, int delta, const std::string& reason) {
-        std::string targetName = (&unit == m_player.get()) ? "1P" : "2P";
-        int rawPower = unit.GetNumber() + delta;
+        const std::string targetName = (&unit == m_player.get()) ? "1P" : "2P";
 
-        if (rawPower <= 0) {
-            if (unit.GetStocks() <= 0) {
-                SetClassicDefeat(unit, reason);
-                return;
-            }
-            unit.AddStocks(-1);
-            while (rawPower <= 0) rawPower += 9;
+        // ラウンドバトルのSTOCKは残機。移動では一切増減させない。
+        if (m_rule.IsRoundBattle()) {
+            const BattleSimulatedUnitState next = m_rule.SimulateRoundMoveCost(
+                unit.GetNumber(), unit.GetStocks(), -delta);
+            const int before = unit.GetNumber();
+            unit.SetNumber(next.number);
+            AddLog("【POWER】 " + targetName + " " + reason + " : " +
+                std::to_string(before) + " -> " + std::to_string(next.number));
+            return;
+        }
+
+        // delta は「加算量」なので、移動コストシミュレーションには -delta を渡す。
+        const BattleSimulatedUnitState next = m_rule.SimulateMoveCost(
+            unit.GetNumber(),
+            unit.GetStocks(),
+            unit.GetMaxStocks(),
+            -delta);
+
+        if (next.defeated) {
+            SetClassicDefeat(unit, reason);
+            return;
+        }
+
+        if (next.stockDelta < 0) {
+            unit.AddStocks(next.stockDelta);
             AddLog("【消費】 " + targetName + " は " + reason + " によりバッテリーを 1 消費！");
         }
-        else if (rawPower > 9) {
-            unit.AddStocks(1);
-            while (rawPower > 9) rawPower -= 9;
+        else if (next.stockDelta > 0) {
+            unit.AddStocks(next.stockDelta);
             AddLog("【充電】 " + targetName + " は " + reason + " によりバッテリーを 1 回復！");
         }
-        unit.SetNumber(rawPower);
+
+        unit.SetNumber(next.number);
     }
 
 } // namespace App

@@ -1,97 +1,31 @@
 #pragma once
 
-#include <cstdlib>
+#include <array>
 #include <memory>
 #include <queue>
 #include <string>
-#include <vector>
 
+#include "BattleRule.h"
+#include "../Battle/BattleViewData.h"
 #include "../Common/Vector2.h"
 #include "../Object/Map/MapGrid.h"
 #include "../Object/Unit/Enemy/Enemy.h"
 #include "../Object/Unit/Player/Player.h"
-#include "../Scene/PauseMenu.h"
 
 namespace App {
 
     class BattleUI;
+    class BattleAI;
     class UnitBase;
+    enum class NetAction;
 
     // ==========================================
-    // Fraction: 分数計算用の構造体
-    // - 小数誤差を出さずに四則演算結果を保持する
-    // - コンストラクタで自動的に約分・正規化する
-    // ==========================================
-    struct Fraction {
-        long long n;  // 分子
-        long long d;  // 分母
-
-        Fraction(long long num = 0, long long den = 1) : n(num), d(den) {
-            Normalize();
-        }
-
-        Fraction operator+(const Fraction& other) const { return Fraction(n * other.d + other.n * d, d * other.d); }
-        Fraction operator-(const Fraction& other) const { return Fraction(n * other.d - other.n * d, d * other.d); }
-        Fraction operator*(const Fraction& other) const { return Fraction(n * other.n, d * other.d); }
-        Fraction operator/(const Fraction& other) const { return Fraction(n * other.d, d * other.n); }
-
-        bool operator==(const Fraction& other) const { return n == other.n && d == other.d; }
-        bool operator>(const Fraction& other) const { return n * other.d > other.n * d; }
-        bool operator<(const Fraction& other) const { return n * other.d < other.n * d; }
-
-        std::string ToString() const {
-            if (d == 1) return std::to_string(n);
-
-            long long whole = n / d;
-            long long rem = std::llabs(n % d);
-
-            if (whole == 0) {
-                return (n < 0 ? "-" : "") + std::to_string(rem) + "/" + std::to_string(d);
-            }
-
-            return std::to_string(whole) + (n < 0 ? " - " : " + ") + std::to_string(rem) + "/" + std::to_string(d);
-        }
-
-    private:
-        static long long GcdAbs(long long a, long long b) {
-            a = std::llabs(a);
-            b = std::llabs(b);
-            while (b != 0) {
-                long long t = b;
-                b = a % b;
-                a = t;
-            }
-            return a;
-        }
-
-        void Normalize() {
-            if (d == 0) {
-                n = 0;
-                d = 1;
-                return;
-            }
-
-            if (d < 0) {
-                n = -n;
-                d = -d;
-            }
-
-            long long gcd = GcdAbs(n, d);
-            if (gcd != 0) {
-                n /= gcd;
-                d /= gcd;
-            }
-        }
-    };
-
-    // ==========================================
-    // BattleMaster: バトル全体を管理するクラス
-    // - ターン制バトルのフロー制御
-    // - 入力 / AI / 勝敗判定 / 演出の入口
+    // BattleMaster
+    // バトル全体の進行と副作用を担当する。
+    // ルール判定・数値計算は BattleRule に委譲する。
+    // UI描画ロジックは持たず、BattleViewData を生成して UI に渡す。
     // ==========================================
     class BattleMaster {
-        friend class BattleUI;
-
     public:
         enum class Phase {
             P1_TurnStart,
@@ -102,14 +36,23 @@ namespace App {
             P2_Action,
             FINISH
         };
+
         enum class GameMode {
             VS_CPU,
             VS_PLAYER
         };
 
-        enum class RuleMode {
-            CLASSIC,   // 残機制
-            ZERO_ONE   // カウント制
+        enum class RoundPhase {
+            INACTIVE,
+            ROUND_START,
+            SELECT_P1_NUMBER,
+            SELECT_P2_NUMBER,
+            TARGET_REVEAL,
+            DRAFT_P1_OPERATOR,
+            DRAFT_P2_OPERATOR,
+            PLACE_OPERATORS,
+            BATTLE,
+            ROUND_END
         };
 
         BattleMaster();
@@ -127,67 +70,84 @@ namespace App {
 
         int GetP1DisplayScore() const { return static_cast<int>(m_p1DisplayScore); }
         int GetP2DisplayScore() const { return static_cast<int>(m_p2DisplayScore); }
-
         int GetTurnStartTimer() const { return m_turnStartTimer; }
 
     private:
         // ---------- ターン / ルール状態 ----------
-        Phase    m_currentPhase;
+        Phase m_currentPhase;
         GameMode m_gameMode;
-        RuleMode m_ruleMode;
-        int      m_maxTurns = 0;
-        bool     m_isPaused = false;
+        BattleRule m_rule;
+
+        // ---------- 新ラウンドバトル ----------
+        // タイトルでは試合種別だけ決め、ラウンド固有の選択はBattle側で管理する。
+        RoundPhase m_roundPhase = RoundPhase::INACTIVE;
+        int m_roundNumber = 0;
+        int m_p1RoundStartNumber = 0;
+        int m_p2RoundStartNumber = 0;
+        int m_roundTarget = 0;
+        int m_roundNumberCursor = 5;
+        int m_roundSetupWaitTimer = 0;
+
+        Fraction m_p1RoundScore{ 0, 1 };
+        Fraction m_p2RoundScore{ 0, 1 };
+
+        std::array<char, 4> m_roundOperators{ '+', '-', '*', '/' };
+        std::array<bool, 4> m_roundOperatorAvailable{ true, true, true, true };
+        int m_roundOperatorCursor = 0;
+        char m_p1DraftedOperator = '\0';
+        char m_p2DraftedOperator = '\0';
+        char m_roundPlacedOperator1 = '\0';
+        char m_roundPlacedOperator2 = '\0';
+        IntVector2 m_roundPlacedPos1{ -1, -1 };
+        IntVector2 m_roundPlacedPos2{ -1, -1 };
+        int m_roundWinner = 0;
+
+        IntVector2 m_p1RoundStartPos{ -1, -1 };
+        IntVector2 m_p2RoundStartPos{ -1, -1 };
 
         // ---------- フィールド / ユニット / UI ----------
         MapGrid m_mapGrid;
         std::unique_ptr<BattleUI> m_ui;
-        std::unique_ptr<Player>   m_player;
-        std::unique_ptr<Enemy>    m_enemy;
-        PauseMenu m_pauseMenu;
+        std::unique_ptr<BattleAI> m_ai;
+        std::unique_ptr<Player> m_player;
+        std::unique_ptr<Enemy> m_enemy;
 
-        // ---------- カウント制用スコア ----------
+        // ---------- 旧カウント制用スコア ----------
+        // 新ルール一本化後に不要なら削除する。
         Fraction m_p1ZeroOneScore;
         Fraction m_p2ZeroOneScore;
-        int      m_targetScore;
+
+        // スコア表示の補間値。勝敗演出との同期に使用する。
+        float m_p1DisplayScore;
+        float m_p2DisplayScore;
 
         // ---------- 入力 / 選択状態 ----------
-        bool       m_isPlayerSelected;
+        bool m_isPlayerSelected;
         IntVector2 m_hoverGrid;
-        int        m_logScrollOffset = 0;
 
         // ---------- CPU / AI 状態 ----------
         bool m_enemyAIStarted;
         bool m_playerAIStarted;
         bool m_is1P_NPC;
         bool m_is2P_NPC;
-        int  g_aiStayCount1P;
-        int  g_aiStayCount2P;
 
-        // ---------- 演算子維持コスト ----------
+        // ---------- 旧ノーマルの演算子維持コスト ----------
         bool m_p1OpCostPending = false;
         bool m_p2OpCostPending = false;
 
+        // ---------- 勝敗 ----------
         bool m_isBattleFinished = false;
         bool m_is1PWinner = false;
 
-        float m_p1DisplayScore;
-        float m_p2DisplayScore;
-
         // ---------- 演出 ----------
-        int   m_finishTimer;
-        int   m_psHandle;
-        int   m_cbHandle;
-        float m_shaderTime;
+        int m_finishTimer;
         float m_effectIntensity;
-        float m_uiCursorX_1P = 0.0f;
-        float m_uiCursorX_2P = 0.0f;
 
         // ---------- 戦績 ----------
         int m_p1TotalMoves, m_p2TotalMoves;
         int m_p1TotalOps, m_p2TotalOps;
         int m_p1MaxDamage, m_p2MaxDamage;
         int m_startTime;
-        std::vector<std::string> m_actionLog;
 
         int m_turnStartTimer;
         int m_aiWaitTimer;
@@ -210,21 +170,37 @@ namespace App {
         bool CheckButtonClick(int x, int y, int w, int h, const Vector2& mousePos) const;
 
         // ---------- バトル処理 ----------
+        // WarpNodeの所有確認だけMasterが行い、通常の合法手判定はRuleへ委譲する。
         bool CanMove(int number, char op, IntVector2 start, IntVector2 target, int& outCost) const;
         void ExecuteBattle(UnitBase& attacker, UnitBase& defender, UnitBase& target);
-        // ★修正：isCleanDivide を追加
         void ApplyBattleResult(UnitBase& unit, const Fraction& resultFrac, int intRes, char op, bool isCleanDivide);
         void AddLog(const std::string& message);
 
+        // ---------- ラウンドセットアップ ----------
+        void UpdateRoundSetup();
+        int ReadRoundNumberKey() const;
+        int ReadRoundOperatorKey() const;
+        void ConfirmRoundStartNumber(bool is1P, int number);
+        void ConfirmRoundOperator(bool is1P, char op);
+        void PlaceRemainingRoundOperators();
+        void BeginRoundBattle();
+        void EndRound(int winnerSide);
+        void PrepareNextRound();
+        void ResetRoundBoardState();
+        bool IsOnlineBattle() const;
+        bool IsLocalRoundController(bool is1P) const;
+        void SendRoundSelection(NetAction action, int value) const;
+        bool ReceiveRoundSelection(NetAction action, int& value) const;
+        int FindRoundOperatorIndex(char op) const;
+        int FindNextAvailableRoundOperatorIndex(int from, int direction) const;
+
+        // ---------- UI表示用 ----------
+        BattleViewData BuildBattleViewData() const;
+
         // ---------- AI ----------
-        int  EvaluateBoard(const UnitBase& me, int myVirtualNumber, const UnitBase& enemy, IntVector2 targetPos, bool is1P) const;
         void ExecuteAI(UnitBase* me, UnitBase* opp, bool is1P);
         void PerformAIMove(UnitBase* me, IntVector2 bestTarget, int selectedCost, bool is1P);
         void ExecuteAIAction(UnitBase* me, UnitBase* opp, bool is1P);
-
-        // ---------- 描画補助 ----------
-        void DrawMovableArea() const;
-        void DrawEnemyDangerArea() const;
     };
 
 } // namespace App

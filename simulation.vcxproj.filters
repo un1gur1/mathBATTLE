@@ -72,7 +72,7 @@
     <ClCompile Include="Src\Object\Map\MapGrid.cpp">
       <Filter>Src\Object\Unit\Map</Filter>
     </ClCompile>
-    <ClCompile Include="Src\Scene\TitleScene.cpp">
+    <ClCompile Include="Src\Scene\TitleScene\TitleScene.cpp">
       <Filter>Src\Scene</Filter>
     </ClCompile>
     <ClCompile Include="Src\Scene\ResultScene.cpp">
@@ -100,6 +100,16 @@
     <ClCompile Include="Src\Manager\FadeManager.cpp" />
     <ClCompile Include="Src\Battle\CommUI.cpp" />
     <ClCompile Include="Src\Manager\PostProcessManager.cpp" />
+    <ClCompile Include="Src\Battle\BattleViewData.cpp" />
+    <ClCompile Include="Src\Battle\BattleBoardUI.cpp" />
+    <ClCompile Include="Src\Battle\BattleLogUI.cpp" />
+    <ClCompile Include="Src\Battle\BattleStatusUI.cpp" />
+    <ClCompile Include="Src\Battle\BattleUICommon.cpp" />
+    <ClCompile Include="Src\Manager\BattleAI.cpp" />
+    <ClCompile Include="Src\Scene\TitleScene\BattleSetup.cpp" />
+    <ClCompile Include="Src\Scene\TitleScene\TitleUI.cpp" />
+    <ClCompile Include="Src\Manager\BattleRule.cpp" />
+    <ClCompile Include="Src\Battle\RoundSetupUI.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Src\Application.h">
@@ -132,7 +142,7 @@
     <ClInclude Include="Src\Object\Map\MapGrid.h">
       <Filter>Src\Object\Unit\Map</Filter>
     </ClInclude>
-    <ClInclude Include="Src\Scene\TitleScene.h">
+    <ClInclude Include="Src\Scene\TitleScene\TitleScene.h">
       <Filter>Src\Scene</Filter>
     </ClInclude>
     <ClInclude Include="Src\Scene\ResultScene.h">
@@ -160,6 +170,18 @@
     <ClInclude Include="Src\Manager\FadeManager.h" />
     <ClInclude Include="Src\Battle\CommUI.h" />
     <ClInclude Include="Src\Manager\PostProcessManager.h" />
+    <ClInclude Include="Src\Battle\BattleViewData.h" />
+    <ClInclude Include="Src\Battle\BattleBoardUI.h" />
+    <ClInclude Include="Src\Battle\BattleLogUI.h" />
+    <ClInclude Include="Src\Battle\BattleStatusUI.h" />
+    <ClInclude Include="Src\Battle\BattleUICommon.h" />
+    <ClInclude Include="Src\Manager\BattleAI.h" />
+    <ClInclude Include="Src\Scene\TitleScene\BattleSetup.h" />
+    <ClInclude Include="Src\Scene\TitleScene\TitleUI.h" />
+    <ClInclude Include="Src\Scene\TitleScene\TitleUILayout.h" />
+    <ClInclude Include="Src\Scene\TitleScene\TitleCommon.h" />
+    <ClInclude Include="Src\Manager\BattleRule.h" />
+    <ClInclude Include="Src\Battle\RoundSetupUI.h" />
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="Src\Shader\PixelShader.hlsl">
