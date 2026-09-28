@@ -43,28 +43,30 @@ namespace App {
         int roundTarget,
         const BattleRule& rule) {
 
-        const Fraction goal(roundTarget);
-        const long long before = DistanceToGoal(myScore, goal);
         std::uniform_int_distribution<int> noise(-60, 60);
+        const int current = static_cast<int>(myScore.n / myScore.d);
+        const int remaining = roundTarget - current;
 
         int bestScore = std::numeric_limits<int>::min();
         char bestOp = '\0';
 
         for (int i = 0; i < static_cast<int>(OPS.size()); ++i) {
             if (!available[i]) continue;
+
             const char op = OPS[i];
-            const BattleCalculationResult calc = rule.CalculateBattleResult(myNumber, enemyNumber, op);
+            const BattleCalculationResult calc =
+                rule.CalculateRoundArithmeticResult(myNumber, enemyNumber, op);
 
             int eval = noise(m_rng);
-            if (op == '/' && !calc.cleanDivide) {
-                eval -= 3000;
+            if (!calc.valid) {
+                eval -= 5000;
             }
             else {
-                const Fraction next = rule.CalculateBouncedScoreToTarget(myScore, calc.fraction, roundTarget);
-                const long long after = DistanceToGoal(next, goal);
-                eval += static_cast<int>((before - after) * 250);
-                if (next == goal) eval += 1000000;
-                if (op == '/') eval += 150;
+                const int value = calc.normalizedValue;
+                if (value == remaining) eval += 1000000;
+                else if (value < remaining) eval += value * 250;
+                else eval -= (value - remaining) * 350;
+                if (op == '/') eval += 120;
             }
 
             if (bestOp == '\0' || eval > bestScore) {
@@ -251,6 +253,21 @@ namespace App {
             const long long myDistNow = DistanceToGoal(myScoreNow, goal);
             const long long enemyDistNow = DistanceToGoal(enemyScoreNow, goal);
 
+            const int chipHere = map.GetNumberChipAt(targetPos.x, targetPos.y);
+            if (chipHere > 0 && virtualOp != '\0') {
+                const BattleCalculationResult chipCalc =
+                    rule.CalculateRoundArithmeticResult(predictedPower, chipHere, virtualOp);
+                if (chipCalc.valid) {
+                    const int currentTotal = static_cast<int>(myScoreNow.n / myScoreNow.d);
+                    const int remaining = context.roundTarget - currentTotal;
+                    score += 2500;
+                    if (chipCalc.normalizedValue == remaining) score += 9000000;
+                    else if (chipCalc.normalizedValue <= remaining) {
+                        score += chipCalc.normalizedValue * 250;
+                    }
+                }
+            }
+
             if (me.GetOp() == '\0') {
                 int bestItemScore = -99999;
                 for (int ix = 0; ix < map.GetWidth(); ++ix) {
@@ -259,8 +276,8 @@ namespace App {
                         if (item == '\0') continue;
                         const int distToItem = std::abs(targetPos.x - ix) + std::abs(targetPos.y - iy);
                         int itemValue = (20 - distToItem) * 450;
-                        const BattleCalculationResult calc = rule.CalculateBattleResult(predictedPower, enemy.GetNumber(), item);
-                        if (item == '/' && !calc.cleanDivide) itemValue -= 1200;
+                        const BattleCalculationResult calc = rule.CalculateRoundArithmeticResult(predictedPower, enemy.GetNumber(), item);
+                        if (!calc.valid) itemValue -= 1200;
                         bestItemScore = std::max(bestItemScore, itemValue);
                     }
                 }
@@ -272,8 +289,8 @@ namespace App {
                 score += (20 - distToEnemy) * 900;
 
                 if (canAttack) {
-                    const BattleCalculationResult calc = rule.CalculateBattleResult(predictedPower, enemy.GetNumber(), virtualOp);
-                    if (virtualOp != '/' || calc.cleanDivide) {
+                    const BattleCalculationResult calc = rule.CalculateRoundArithmeticResult(predictedPower, enemy.GetNumber(), virtualOp);
+                    if (calc.valid) {
                         const BattleSimulatedUnitState selfState = rule.SimulateRoundBattleResult(
                             predictedPower, predictedStocks, myScoreNow, context.roundTarget,
                             calc.intValue, calc.fraction, virtualOp, calc.cleanDivide);

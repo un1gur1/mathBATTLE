@@ -252,6 +252,46 @@ namespace App {
         return '\0';
     }
 
+    int MapGrid::GetNumberChipAt(int x, int y) const {
+        for (const auto& chip : m_numberChips) {
+            if (chip.pos.x == x && chip.pos.y == y) return chip.value;
+        }
+        return 0;
+    }
+
+    int MapGrid::PickUpNumberChip(int x, int y) {
+        for (auto it = m_numberChips.begin(); it != m_numberChips.end(); ++it) {
+            if (it->pos.x == x && it->pos.y == y) {
+                const int value = it->value;
+                m_numberChips.erase(it);
+                return value;
+            }
+        }
+        return 0;
+    }
+
+    void MapGrid::SetNumberChipAt(int x, int y, int value) {
+        if (!IsWithinBounds(x, y)) return;
+        value = std::clamp(value, 1, 9);
+
+        for (auto& chip : m_numberChips) {
+            if (chip.pos.x == x && chip.pos.y == y) {
+                chip.value = value;
+                return;
+            }
+        }
+        m_numberChips.push_back(NumberChip{ IntVector2{ x, y }, value });
+    }
+
+    void MapGrid::ClearNumberChips() {
+        m_numberChips.clear();
+    }
+
+    bool MapGrid::HasAnyItemAt(int x, int y) const {
+        return GetItemAt(x, y) != '\0' || GetNumberChipAt(x, y) != 0;
+    }
+
+
     // ==========================================
     // マップ描画: グリッド＆最高級シェーダーアイテムの表示
     // ==========================================
@@ -352,6 +392,34 @@ namespace App {
             }
             SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
         }
+
+        // ROUND_BATTLE: 数字チップ
+        for (const auto& chip : m_numberChips) {
+            if (chip.value < 1 || chip.value > 9) continue;
+
+            const Vector2 center = GetCellCenter(chip.pos.x, chip.pos.y);
+            const float pulse = static_cast<float>(std::sin(GetNowCount() / 180.0) * 3.0);
+            const unsigned int edge = GetColor(100, 255, 210);
+            const unsigned int fill = GetColor(15, 55, 55);
+
+            SetDrawBlendMode(DX_BLENDMODE_ALPHA, 220);
+            DrawCircleAA(center.x, center.y, 29.0f + pulse, 48, fill, TRUE);
+            SetDrawBlendMode(DX_BLENDMODE_ADD, 180);
+            DrawCircleAA(center.x, center.y, 32.0f + pulse, 48, edge, FALSE, 3.0f);
+            SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+
+            if (g_gridFontHandle != -1) {
+                const std::string valueText = std::to_string(chip.value);
+                const int tw = GetDrawStringWidthToHandle(
+                    valueText.c_str(), static_cast<int>(valueText.size()), g_gridFontHandle);
+                DrawStringToHandle(
+                    static_cast<int>(center.x) - tw / 2,
+                    static_cast<int>(center.y) - 21,
+                    valueText.c_str(),
+                    GetColor(235, 255, 250),
+                    g_gridFontHandle);
+            }
+        }
     }
 
 
@@ -360,6 +428,7 @@ namespace App {
     // ==========================================
     void MapGrid::ClearItems() {
         m_spawnPoints.clear();
+        m_numberChips.clear();
     }
 
     // ==========================================

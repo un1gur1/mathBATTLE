@@ -36,8 +36,8 @@ namespace App {
 
         const unsigned int baseCol = is1P ? COL_P1() : COL_P2();
         const std::string headerName = is1P
-            ? (unitView.isNPC ? "1P (COM)" : "1P PLAYER")
-            : (unitView.isNPC ? "2P (COM)" : "2P PLAYER");
+            ? (unitView.isNPC ? "1P（コンピューター）" : "1P プレイヤー")
+            : (unitView.isNPC ? "2P（コンピューター）" : "2P プレイヤー");
 
         if (unitView.activeTurn) {
             SetDrawBlendMode(DX_BLENDMODE_ADD, static_cast<int>(80 + 40 * std::sin(GetNowCount() / 200.0)));
@@ -56,7 +56,7 @@ namespace App {
             DrawCyberPanel(x + 10, scoreY, 480, 130, COL_DARK_BG(), baseCol, 255);
             DrawStringToHandle(
                 x + 20, scoreY + 5,
-                view.ruleMode == BattleViewRuleMode::ROUND_BATTLE ? "ROUND SCORE" : "現在のスコア",
+                view.ruleMode == BattleViewRuleMode::ROUND_BATTLE ? "合計値" : "現在のスコア",
                 COL_TEXT_SUB(), GetCachedFont(18));
 
             if (unitView.score.d == 1) {
@@ -116,7 +116,7 @@ namespace App {
             DrawCyberPanel(x + 10, targetBoxY, 480, 40, GetColor(20, 30, 40), COL_INFO(), 255);
             DrawStringToHandle(
                 x + 20, targetBoxY + 10,
-                view.ruleMode == BattleViewRuleMode::ROUND_BATTLE ? "ROUND TARGET" : "目標スコア",
+                view.ruleMode == BattleViewRuleMode::ROUND_BATTLE ? "ラウンド目標値" : "目標スコア",
                 COL_INFO(), GetCachedFont(20));
             DrawFormatStringToHandle(x + 390, targetBoxY + 4, COL_SAFE(), GetCachedFont(32), "%03d", view.targetScore);
         }
@@ -186,9 +186,8 @@ namespace App {
         DrawCyberPanel(x + 10, infoY, 480, 110, COL_DARK_BG(), baseCol, 255);
         const int f22 = GetCachedFont(22);
 
-        if (view.ruleMode == BattleViewRuleMode::CLASSIC || view.ruleMode == BattleViewRuleMode::ROUND_BATTLE) {
-            const char* stockLabel = view.ruleMode == BattleViewRuleMode::ROUND_BATTLE ? "STOCK" : "バッテリー";
-            DrawStringToHandle(x + 20, infoY + 15, stockLabel, GetColor(180, 180, 180), f22);
+        if (view.ruleMode == BattleViewRuleMode::CLASSIC) {
+            DrawStringToHandle(x + 20, infoY + 15, "バッテリー", GetColor(180, 180, 180), f22);
             DrawBatteryGauge(
                 x + 140,
                 infoY + 12,
@@ -199,6 +198,19 @@ namespace App {
                 COL_DANGER(),
                 baseCol
             );
+        }
+        else if (view.ruleMode == BattleViewRuleMode::ROUND_BATTLE) {
+            const int wins = is1P ? view.p1RoundWins : view.p2RoundWins;
+            const char fixedOp = is1P ? view.p1FixedOperator : view.p2FixedOperator;
+            const char subOp = is1P ? view.p1SubOperator : view.p2SubOperator;
+            DrawFormatStringToHandle(
+                x + 20, infoY + 10, baseCol, f22,
+                "ラウンド勝利 : %d / 2", wins);
+            DrawFormatStringToHandle(
+                x + 20, infoY + 40, COL_TEXT_SUB(), GetCachedFont(20),
+                "固定 [%c]   サブ [%c]",
+                fixedOp == '\0' ? '-' : fixedOp,
+                subOp == '\0' ? '-' : subOp);
         }
 
         if (unitView.hasPowerPreview && !unitView.previewDefeated && previewNum != currentNum) {

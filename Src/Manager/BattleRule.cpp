@@ -1,4 +1,4 @@
-#include "BattleRule.h"
+ï»¿#include "BattleRule.h"
 
 #include <algorithm>
 #include <cmath>
@@ -158,6 +158,47 @@ namespace App {
         return result;
     }
 
+
+    BattleCalculationResult BattleRule::CalculateRoundArithmeticResult(
+        int leftNumber,
+        int rightNumber,
+        char op) const {
+
+        BattleCalculationResult result;
+        result.valid = false;
+        result.cleanDivide = true;
+
+        int raw = 0;
+        if (op == '+') raw = leftNumber + rightNumber;
+        else if (op == '-') raw = std::abs(leftNumber - rightNumber);
+        else if (op == '*') raw = leftNumber * rightNumber;
+        else if (op == '/') {
+            if (rightNumber == 0 || leftNumber % rightNumber != 0) {
+                result.cleanDivide = false;
+                return result;
+            }
+            raw = leftNumber / rightNumber;
+        }
+        else {
+            return result;
+        }
+
+        // 0ã¯åˆç‰ˆROUND_BATTLEã§ã¯æ‰±ã‚ãªã„ã€‚
+        if (raw <= 0) return result;
+
+        result.valid = true;
+        result.rawValue = raw;
+        result.normalizedValue = NormalizeRoundValue(raw);
+        result.intValue = raw;
+        result.fraction = BattleFraction(raw);
+        return result;
+    }
+
+    int BattleRule::NormalizeRoundValue(int value) const {
+        if (value <= 0) return 0;
+        return 1 + ((value - 1) % 9);
+    }
+
     IntVector2 BattleRule::GetWarpGrid(int attackerNumber, int defenderNumber) const {
         return IntVector2{ attackerNumber - 1, 9 - defenderNumber };
     }
@@ -274,6 +315,8 @@ namespace App {
         char op,
         bool isCleanDivide) const {
 
+        (void)resultFrac;
+
         BattleSimulatedUnitState out;
         out.number = currentNumber;
         out.stocks = currentStocks;
@@ -282,9 +325,15 @@ namespace App {
 
         if (op == '/' && !isCleanDivide) return out;
 
+        const int normalized = NormalizeRoundValue(intResult);
+        if (normalized <= 0) return out;
+
+        const BattleFraction nextScore = currentScore + BattleFraction(normalized);
+        if (nextScore > BattleFraction(roundTarget)) return out;
+
         out.valid = true;
-        out.number = WrapPower1To9(intResult);
-        out.score = CalculateBouncedScoreToTarget(currentScore, resultFrac, roundTarget);
+        out.number = normalized;
+        out.score = nextScore;
         return out;
     }
 
@@ -351,19 +400,19 @@ namespace App {
     std::array<std::string, 5> BattleRule::GetRuleLines() const {
         if (IsRoundBattle()) {
             return {
-                "‰Šú”š‚ğ‘I‘ğ / TARGET=9+P1+P2",
-                "P1->P2‚Å‰‰Zqƒhƒ‰ƒtƒg / c‚è2ŒÂ‚Í”Õ–Ê",
-                "ˆÚ“®ƒRƒXƒg‚ÍPOWER‚Ì‚İzŠÂ / STOCK•s•Ï",
-                "‰‰ZŒ‹‰Ê‚ğ‘ÎÛSCORE‚Ö‰ÁZ / ‰‰Zq‚Í•Û",
-                "TARGET‚Ò‚Á‚½‚è‚Å‘ŠèSTOCK -1"
+                "ç›®æ¨™å€¤ = 9 + P1åˆæœŸæ•°å­— + P2åˆæœŸæ•°å­—",
+                "å›ºå®šæ¼”ç®—å­ã¯ä½•åº¦ã§ã‚‚ä½¿ç”¨ / ã‚µãƒ–æ¼”ç®—å­ã¯ä½¿ç”¨ã—ãŸã‚¿ãƒ¼ãƒ³ã§æ¶ˆè²»",
+                "è¨ˆç®—çµæœã‚’1ã€œ9ã¸æ­£è¦åŒ–ã—ã€åˆè¨ˆå€¤ã¸åŠ ç®—ã™ã‚‹ã‹æ•°å­—ãƒãƒƒãƒ—åŒ–",
+                "é€šå¸¸ç§»å‹•ã¯æœ€åˆã®ã‚¢ã‚¤ãƒ†ãƒ ãƒã‚¹ã¾ã§ã€‚Ã·ã‚¸ãƒ£ãƒ³ãƒ—ã¨ãƒ¯ãƒ¼ãƒ—ã¯é€šéå¯",
+                "3ãƒ©ã‚¦ãƒ³ãƒ‰åˆ¶2æœ¬å…ˆå–ï¼šå…ˆã«2ãƒ©ã‚¦ãƒ³ãƒ‰å–ã£ãŸãƒ—ãƒ¬ã‚¤ãƒ¤ãƒ¼ãŒå‹åˆ©"
             };
         }
         return {
-            "‹——£ [1,4,7]=3 / [2,5,8]=2 / [3,6,9]=1",
-            "•ûŒü [1-3]=\š / [4-6]=Î‚ß / [7-9]=‘S•ûˆÊ",
-            "‰‰Zq +:\š / -:‰¡ / *:Î‚ß / €:‰¡+c2ƒWƒƒƒ“ƒv",
-            "‰‰Zqæ“¾‚ÅUŒ‚EˆÚ“®ƒ‹[ƒgŠg’£",
-            "€ ‚Í (©•ª,‘Šè) ‚ÌÀ•W‚Éƒ[ƒv‚ğİ’u"
+            "è·é›¢ [1,4,7]=3 / [2,5,8]=2 / [3,6,9]=1",
+            "æ–¹å‘ [1-3]=åå­— / [4-6]=æ–œã‚ / [7-9]=å…¨æ–¹å‘",
+            "æ¼”ç®—å­ +:åå­— / -:æ¨ª / *:æ–œã‚ / /:æ¨ª+ç¸¦2ã‚¸ãƒ£ãƒ³ãƒ—",
+            "æ¼”ç®—å­å–å¾—ã§æ”»æ’ƒãƒ»ç§»å‹•ãƒ«ãƒ¼ãƒˆæ‹¡å¼µ",
+            "/ ã¯ (è‡ªåˆ†,ç›¸æ‰‹) ã®åº§æ¨™ã«ãƒ¯ãƒ¼ãƒ—ã‚’è¨­ç½®"
         };
     }
 

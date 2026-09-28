@@ -51,6 +51,7 @@ namespace App {
         void DrawTurnStartCutIn(const BattleViewData& view) const;
         void DrawPauseButton(const BattleViewData& view) const;
         void DrawFinishOverlay(const BattleViewData& view) const;
+        void DrawRoundBattleControls(const BattleViewData& view) const;
 
         int m_psHandle;
         int m_cbHandle;

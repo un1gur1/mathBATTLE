@@ -102,6 +102,7 @@ namespace App {
 
     void BattleMaster::FinishActionPhase(bool is1P) {
         ApplyOperatorUpkeepCost(is1P);
+        if (m_rule.IsRoundBattle()) ConsumeRoundSubIfUsed(is1P);
 
         // ラウンド勝利が確定した直後は次ターンへ進めない。
         if (m_rule.IsRoundBattle() && m_roundPhase != RoundPhase::BATTLE) return;
@@ -190,7 +191,7 @@ namespace App {
 
         if (is1P) {
             m_p1RoundStartNumber = number;
-            AddLog("【ROUND】 1P 初期数字: " + std::to_string(number));
+            AddLog("【ラウンド】 1P 初期数字: " + std::to_string(number));
             m_roundPhase = RoundPhase::SELECT_P2_NUMBER;
             m_roundNumberCursor = 5;
             m_roundSetupWaitTimer = 20;
@@ -198,16 +199,16 @@ namespace App {
         else {
             m_p2RoundStartNumber = number;
             m_roundTarget = m_rule.CalculateRoundTarget(m_p1RoundStartNumber, m_p2RoundStartNumber);
-            m_p1RoundScore = Fraction(m_p1RoundStartNumber);
-            m_p2RoundScore = Fraction(m_p2RoundStartNumber);
-            m_p1DisplayScore = static_cast<float>(m_p1RoundStartNumber);
-            m_p2DisplayScore = static_cast<float>(m_p2RoundStartNumber);
+            m_p1RoundScore = Fraction(0);
+            m_p2RoundScore = Fraction(0);
+            m_p1DisplayScore = 0.0f;
+            m_p2DisplayScore = 0.0f;
 
             if (m_player) m_player->SetNumber(m_p1RoundStartNumber);
             if (m_enemy) m_enemy->SetNumber(m_p2RoundStartNumber);
 
-            AddLog("【ROUND】 2P 初期数字: " + std::to_string(number));
-            AddLog("【TARGET】 9 + " + std::to_string(m_p1RoundStartNumber) +
+            AddLog("【ラウンド】 2P 初期数字: " + std::to_string(number));
+            AddLog("【目標値】 9 + " + std::to_string(m_p1RoundStartNumber) +
                 " + " + std::to_string(m_p2RoundStartNumber) +
                 " = " + std::to_string(m_roundTarget));
             m_roundPhase = RoundPhase::TARGET_REVEAL;
@@ -225,7 +226,7 @@ namespace App {
         if (is1P) {
             m_p1DraftedOperator = op;
             if (m_player) m_player->SetOp(op);
-            AddLog("【DRAFT】 1P が [" + std::string(1, op) + "] を選択");
+            AddLog("【演算子選択】 1P が [" + std::string(1, op) + "] を選択");
             m_roundPhase = RoundPhase::DRAFT_P2_OPERATOR;
             m_roundOperatorCursor = FindNextAvailableRoundOperatorIndex(index, 1);
             m_roundSetupWaitTimer = 20;
@@ -233,7 +234,7 @@ namespace App {
         else {
             m_p2DraftedOperator = op;
             if (m_enemy) m_enemy->SetOp(op);
-            AddLog("【DRAFT】 2P が [" + std::string(1, op) + "] を選択");
+            AddLog("【演算子選択】 2P が [" + std::string(1, op) + "] を選択");
             PlaceRemainingRoundOperators();
             m_roundPhase = RoundPhase::PLACE_OPERATORS;
             m_roundSetupWaitTimer = 75;
@@ -286,7 +287,7 @@ namespace App {
             m_mapGrid.SetItemAt(second.x, second.y, m_roundPlacedOperator2);
         }
 
-        AddLog("【FIELD】 残り演算子 [" + std::string(1, m_roundPlacedOperator1) + "] [" +
+        AddLog("【盤面配置】 残り演算子 [" + std::string(1, m_roundPlacedOperator1) + "] [" +
             std::string(1, m_roundPlacedOperator2) + "] を盤面へ配置");
     }
 
@@ -301,8 +302,20 @@ namespace App {
         m_p1OpCostPending = false;
         m_p2OpCostPending = false;
 
-        AddLog("【ROUND " + std::to_string(m_roundNumber) + "】 BATTLE START / TARGET " + std::to_string(m_roundTarget));
-        AddLog("1P SCORE=" + m_p1RoundScore.ToString() + "  2P SCORE=" + m_p2RoundScore.ToString());
+        m_p1SubOperator = '\0';
+        m_p2SubOperator = '\0';
+        m_p1UsingSub = false;
+        m_p2UsingSub = false;
+        m_p1TurnOperator = m_p1DraftedOperator;
+        m_p2TurnOperator = m_p2DraftedOperator;
+        SyncRoundTurnOperator(true);
+        SyncRoundTurnOperator(false);
+
+        m_roundResultPending = false;
+        m_roundChipPlacementPending = false;
+
+        AddLog("【ラウンド " + std::to_string(m_roundNumber) + "】 バトル開始 / 目標値 " + std::to_string(m_roundTarget));
+        AddLog("1P 合計値=0  2P 合計値=0 / 先に2ラウンド取った方が勝利");
         ProceduralAudio::GetInstance().PlayPowerSE(9);
     }
 
@@ -311,43 +324,37 @@ namespace App {
         if (winnerSide != 1 && winnerSide != 2) return;
 
         m_roundWinner = winnerSide;
-        UnitBase* loser = winnerSide == 1 ? static_cast<UnitBase*>(m_enemy.get()) : static_cast<UnitBase*>(m_player.get());
-        if (loser) loser->AddStocks(-1);
+        if (winnerSide == 1) ++m_p1RoundWins;
+        else ++m_p2RoundWins;
 
-        const int loserStocks = loser ? loser->GetStocks() : 0;
-        AddLog("【ROUND WIN】 " + std::to_string(winnerSide) + "P がTARGET到達！");
-        AddLog("【STOCK】 " + std::string(winnerSide == 1 ? "2P" : "1P") + " STOCK -1 -> " + std::to_string(loserStocks));
+        AddLog("【ラウンド勝利】 " + std::to_string(winnerSide) + "P が目標値にぴったり到達！");
+        AddLog("【試合状況】 1P " + std::to_string(m_p1RoundWins) +
+            " - " + std::to_string(m_p2RoundWins) + " 2P");
 
         m_roundPhase = RoundPhase::ROUND_END;
         m_roundSetupWaitTimer = 120;
         m_effectIntensity = 2.5f;
         ProceduralAudio::GetInstance().PlayPowerSE(9);
 
-        if (loserStocks <= 0) {
+        if (m_p1RoundWins >= 2 || m_p2RoundWins >= 2) {
             m_isBattleFinished = true;
-            m_is1PWinner = (winnerSide == 1);
-            AddLog("【GAME SET】 " + std::to_string(winnerSide) + "P WIN");
+            m_is1PWinner = (m_p1RoundWins >= 2);
+            AddLog("【試合終了】 " + std::to_string(winnerSide) + "P 勝利 / 3ラウンド制2本先取");
         }
     }
 
     void BattleMaster::ResetRoundBoardState() {
-        const int p1Stocks = m_player ? m_player->GetStocks() : 0;
-        const int p2Stocks = m_enemy ? m_enemy->GetStocks() : 0;
-        const int p1Max = m_player ? m_player->GetMaxStocks() : p1Stocks;
-        const int p2Max = m_enemy ? m_enemy->GetMaxStocks() : p2Stocks;
+        const int p1Max = m_player ? m_player->GetMaxStocks() : 3;
+        const int p2Max = m_enemy ? m_enemy->GetMaxStocks() : 3;
 
         m_player = std::make_unique<Player>(
             m_p1RoundStartPos,
             m_mapGrid.GetCellCenter(m_p1RoundStartPos.x, m_p1RoundStartPos.y),
-            5,
-            p1Stocks,
-            p1Max);
+            5, p1Max, p1Max);
         m_enemy = std::make_unique<Enemy>(
             m_p2RoundStartPos,
             m_mapGrid.GetCellCenter(m_p2RoundStartPos.x, m_p2RoundStartPos.y),
-            5,
-            p2Stocks,
-            p2Max);
+            5, p2Max, p2Max);
 
         m_player->SetOp('\0');
         m_enemy->SetOp('\0');
@@ -366,11 +373,25 @@ namespace App {
         m_roundOperatorCursor = 0;
         m_p1DraftedOperator = '\0';
         m_p2DraftedOperator = '\0';
+        m_p1SubOperator = '\0';
+        m_p2SubOperator = '\0';
+        m_p1TurnOperator = '\0';
+        m_p2TurnOperator = '\0';
+        m_p1UsingSub = false;
+        m_p2UsingSub = false;
         m_roundPlacedOperator1 = '\0';
         m_roundPlacedOperator2 = '\0';
         m_roundPlacedPos1 = { -1, -1 };
         m_roundPlacedPos2 = { -1, -1 };
         m_roundWinner = 0;
+
+        m_roundResultPending = false;
+        m_roundChipPlacementPending = false;
+        m_roundPendingResult = 0;
+        m_roundPendingRaw = 0;
+        m_roundPendingOperand = 0;
+        m_roundPendingOperandWasChip = false;
+        m_roundPendingChipSource = { -1, -1 };
 
         m_currentPhase = Phase::P1_TurnStart;
         m_turnStartTimer = 0;
@@ -394,7 +415,7 @@ namespace App {
         ResetRoundBoardState();
         m_roundPhase = RoundPhase::ROUND_START;
         m_roundSetupWaitTimer = 30;
-        AddLog(">>> ROUND " + std::to_string(m_roundNumber) + " START");
+        AddLog(">>> ラウンド " + std::to_string(m_roundNumber) + " 開始");
     }
 
     void BattleMaster::UpdateRoundSetup() {
@@ -404,10 +425,15 @@ namespace App {
         const bool confirm = input.IsTrgDown(KEY_INPUT_SPACE) || input.IsTrgDown(KEY_INPUT_RETURN);
         const bool back = input.IsTrgDown(KEY_INPUT_B) || input.IsTrgDown(KEY_INPUT_BACK);
         const bool online = IsOnlineBattle();
+        const Vector2 mousePos = input.GetMousePos();
+        const bool mouseClick = input.IsMouseLeftTrg();
 
         switch (m_roundPhase) {
         case RoundPhase::ROUND_START:
-            if ((confirm && !online && m_roundSetupWaitTimer <= 0) ||
+        {
+            const bool startClicked = mouseClick &&
+                CheckButtonClick(760, 720, 400, 70, mousePos);
+            if (((confirm || startClicked) && !online && m_roundSetupWaitTimer <= 0) ||
                 (m_roundSetupWaitTimer <= 0 && (online || (m_is1P_NPC && m_is2P_NPC)))) {
                 m_roundPhase = RoundPhase::SELECT_P1_NUMBER;
                 m_roundNumberCursor = 5;
@@ -415,6 +441,7 @@ namespace App {
                 ProceduralAudio::GetInstance().PlayPowerSE(9);
             }
             break;
+        }
 
         case RoundPhase::SELECT_P1_NUMBER:
         case RoundPhase::SELECT_P2_NUMBER:
@@ -436,6 +463,29 @@ namespace App {
                     ConfirmRoundStartNumber(is1P, m_ai->ChooseRoundStartNumber());
                 }
                 break;
+            }
+
+            if (mouseClick && m_roundSetupWaitTimer <= 0) {
+                constexpr int BOX_W = 86;
+                constexpr int BOX_H = 86;
+                constexpr int GAP = 16;
+                constexpr int COUNT = 9;
+                const int totalW = BOX_W * COUNT + GAP * (COUNT - 1);
+                const int startX = (1920 - totalW) / 2;
+                const int y = 465;
+
+                for (int i = 0; i < COUNT; ++i) {
+                    const int x = startX + i * (BOX_W + GAP);
+                    if (CheckButtonClick(x, y, BOX_W, BOX_H, mousePos)) {
+                        m_roundNumberCursor = i + 1;
+                        if (online) SendRoundSelection(NetAction::ROUND_NUMBER, m_roundNumberCursor);
+                        ConfirmRoundStartNumber(is1P, m_roundNumberCursor);
+                        break;
+                    }
+                }
+                if (m_roundPhase != (is1P ? RoundPhase::SELECT_P1_NUMBER : RoundPhase::SELECT_P2_NUMBER)) {
+                    break;
+                }
             }
 
             const int directNumber = ReadRoundNumberKey();
@@ -476,7 +526,7 @@ namespace App {
         }
 
         case RoundPhase::TARGET_REVEAL:
-            if (m_roundSetupWaitTimer <= 0 || (!online && confirm)) {
+            if (m_roundSetupWaitTimer <= 0 || (!online && (confirm || mouseClick))) {
                 m_roundPhase = RoundPhase::DRAFT_P1_OPERATOR;
                 m_roundOperatorCursor = FindNextAvailableRoundOperatorIndex(-1, 1);
                 m_roundSetupWaitTimer = 15;
@@ -509,6 +559,30 @@ namespace App {
                     ConfirmRoundOperator(is1P, chosen);
                 }
                 break;
+            }
+
+            if (mouseClick && m_roundSetupWaitTimer <= 0) {
+                constexpr int BOX_W = 160;
+                constexpr int BOX_H = 120;
+                constexpr int GAP = 42;
+                const int totalW = BOX_W * 4 + GAP * 3;
+                const int startX = (1920 - totalW) / 2;
+                const int y = 490;
+
+                for (int i = 0; i < 4; ++i) {
+                    const int x = startX + i * (BOX_W + GAP);
+                    if (m_roundOperatorAvailable[i] &&
+                        CheckButtonClick(x, y, BOX_W, BOX_H, mousePos)) {
+                        m_roundOperatorCursor = i;
+                        const char op = m_roundOperators[i];
+                        if (online) SendRoundSelection(NetAction::ROUND_OPERATOR, static_cast<int>(op));
+                        ConfirmRoundOperator(is1P, op);
+                        break;
+                    }
+                }
+                if (m_roundPhase != (is1P ? RoundPhase::DRAFT_P1_OPERATOR : RoundPhase::DRAFT_P2_OPERATOR)) {
+                    break;
+                }
             }
 
             const int directIndex = ReadRoundOperatorKey();
@@ -553,13 +627,13 @@ namespace App {
         }
 
         case RoundPhase::PLACE_OPERATORS:
-            if (m_roundSetupWaitTimer <= 0 || (!online && confirm)) {
+            if (m_roundSetupWaitTimer <= 0 || (!online && (confirm || mouseClick))) {
                 BeginRoundBattle();
             }
             break;
 
         case RoundPhase::ROUND_END:
-            if (m_roundSetupWaitTimer <= 0 || (!online && confirm)) {
+            if (m_roundSetupWaitTimer <= 0 || (!online && (confirm || mouseClick))) {
                 PrepareNextRound();
             }
             break;
@@ -660,6 +734,22 @@ namespace App {
         m_roundPlacedPos1 = { -1, -1 };
         m_roundPlacedPos2 = { -1, -1 };
         m_roundWinner = 0;
+        m_p1RoundWins = 0;
+        m_p2RoundWins = 0;
+        m_p1SubOperator = '\0';
+        m_p2SubOperator = '\0';
+        m_p1TurnOperator = '\0';
+        m_p2TurnOperator = '\0';
+        m_p1UsingSub = false;
+        m_p2UsingSub = false;
+        m_roundResultPending = false;
+        m_roundChipPlacementPending = false;
+        m_roundPendingIs1P = true;
+        m_roundPendingResult = 0;
+        m_roundPendingRaw = 0;
+        m_roundPendingOperand = 0;
+        m_roundPendingOperandWasChip = false;
+        m_roundPendingChipSource = { -1, -1 };
         if (m_rule.IsRoundBattle()) {
             m_roundPhase = RoundPhase::ROUND_START;
             m_roundNumber = 1;
@@ -676,13 +766,13 @@ namespace App {
             m_mapGrid.ClearItems();
         }
         std::string rModeStr = m_rule.IsClassic() ? "ノーマル" : (m_rule.IsZeroOne() ? "カウント" : "ラウンド");
-        AddLog(">>> バトル開始！ [1P:" + std::string(m_is1P_NPC ? "COM" : "PLAYER") + " vs 2P:" + std::string(m_is2P_NPC ? "COM" : "PLAYER") + " / " + rModeStr + "]");
+        AddLog(">>> バトル開始！ [1P:" + std::string(m_is1P_NPC ? "コンピューター" : "プレイヤー") + " vs 2P:" + std::string(m_is2P_NPC ? "コンピューター" : "プレイヤー") + " / " + rModeStr + "]");
 
         if (m_rule.IsZeroOne()) {
             AddLog(">>> 目標：相手よりはやくスコアを【 " + std::to_string(m_rule.GetTargetScore()) + " 】にしよう！");
         }
         else if (m_rule.IsRoundBattle()) {
-            AddLog(">>> ROUND 1 START：ラウンド固有の数字・演算子選択はBattle側で進行します。");
+            AddLog(">>> ラウンド1開始：ラウンド固有の数字・演算子選択を行います。");
         }
         else {
             AddLog(">>> 目標：相手の残機をなくして、勝利を目指そう！");
@@ -695,8 +785,347 @@ namespace App {
         else if (m_enemy && m_enemy->GetGridPos() == start) unit = m_enemy.get();
 
         const bool isWarpNode = unit && unit->HasWarpNode(target);
-        return m_rule.CanMove(number, op, start, target, isWarpNode, outCost);
+        if (!m_rule.CanMove(number, op, start, target, isWarpNode, outCost)) return false;
+
+        if (m_rule.IsRoundBattle()) {
+            const IntVector2 other = (unit == m_player.get() && m_enemy)
+                ? m_enemy->GetGridPos()
+                : ((unit == m_enemy.get() && m_player) ? m_player->GetGridPos() : IntVector2{ -99, -99 });
+            if (target == other) return false;
+            if (!CanRoundMovePath(start, target, op, isWarpNode)) return false;
+        }
+        return true;
     }
+
+    bool BattleMaster::IsOccupiedByUnit(IntVector2 pos) const {
+        return (m_player && m_player->GetGridPos() == pos) ||
+            (m_enemy && m_enemy->GetGridPos() == pos);
+    }
+
+    bool BattleMaster::CanRoundMovePath(
+        IntVector2 start,
+        IntVector2 target,
+        char op,
+        bool isWarp) const {
+
+        if (isWarp) return true;
+
+        const int dx = target.x - start.x;
+        const int dy = target.y - start.y;
+
+        // / の縦2マスジャンプは中間マスを通過しない。
+        if (op == '/' && dx == 0 && std::abs(dy) == 2) return true;
+
+        const int stepX = (dx > 0) ? 1 : (dx < 0 ? -1 : 0);
+        const int stepY = (dy > 0) ? 1 : (dy < 0 ? -1 : 0);
+        const int steps = std::max(std::abs(dx), std::abs(dy));
+
+        IntVector2 cur = start;
+        for (int i = 1; i <= steps; ++i) {
+            cur.x += stepX;
+            cur.y += stepY;
+
+            const bool isTarget = (cur == target);
+
+            // 相手駒は通過も着地も不可。
+            if (IsOccupiedByUnit(cur)) {
+                return false;
+            }
+
+            // 通常移動では最初のアイテムマスまでは移動可能。
+            // そのアイテムより先には進めない。
+            if (m_mapGrid.HasAnyItemAt(cur.x, cur.y)) {
+                return isTarget;
+            }
+        }
+        return true;
+    }
+
+    void BattleMaster::SyncRoundTurnOperator(bool is1P) {
+        UnitBase* unit = GetUnitBySide(is1P);
+        if (!unit) return;
+        const char op = is1P ? m_p1TurnOperator : m_p2TurnOperator;
+        unit->SetOp(op);
+    }
+
+    void BattleMaster::SelectRoundTurnOperator(bool is1P, bool useSub) {
+        char& turnOp = is1P ? m_p1TurnOperator : m_p2TurnOperator;
+        const char fixedOp = is1P ? m_p1DraftedOperator : m_p2DraftedOperator;
+        const char subOp = is1P ? m_p1SubOperator : m_p2SubOperator;
+        bool& usingSub = is1P ? m_p1UsingSub : m_p2UsingSub;
+
+        if (useSub && subOp != '\0') {
+            turnOp = subOp;
+            usingSub = true;
+        }
+        else {
+            turnOp = fixedOp;
+            usingSub = false;
+        }
+        SyncRoundTurnOperator(is1P);
+    }
+
+    void BattleMaster::ConsumeRoundSubIfUsed(bool is1P) {
+        bool& usingSub = is1P ? m_p1UsingSub : m_p2UsingSub;
+        char& sub = is1P ? m_p1SubOperator : m_p2SubOperator;
+        if (usingSub && sub != '\0') {
+            AddLog(std::string("【サブ演算子使用】 ") + (is1P ? "1P" : "2P") +
+                " [" + std::string(1, sub) + "] を消費");
+            sub = '\0';
+        }
+        usingSub = false;
+        SelectRoundTurnOperator(is1P, false);
+    }
+
+    bool BattleMaster::HandleRoundOperatorMouse(bool is1P, const Vector2& mousePos) {
+        if (!m_rule.IsRoundBattle()) return false;
+
+        constexpr int y = 850;
+        constexpr int h = 70;
+        constexpr int fixedX = 610;
+        constexpr int fixedW = 330;
+        constexpr int subX = 980;
+        constexpr int subW = 330;
+
+        if (CheckButtonClick(fixedX, y, fixedW, h, mousePos)) {
+            SelectRoundTurnOperator(is1P, false);
+            ProceduralAudio::GetInstance().PlayPowerSE(2);
+            return true;
+        }
+
+        const char sub = is1P ? m_p1SubOperator : m_p2SubOperator;
+        if (sub != '\0' && CheckButtonClick(subX, y, subW, h, mousePos)) {
+            SelectRoundTurnOperator(is1P, true);
+            ProceduralAudio::GetInstance().PlayPowerSE(2);
+            return true;
+        }
+        return false;
+    }
+
+    int BattleMaster::GetRoundChipOperandForActor(const UnitBase& actor) const {
+        const IntVector2 pos = actor.GetGridPos();
+        return m_mapGrid.GetNumberChipAt(pos.x, pos.y);
+    }
+
+    std::vector<IntVector2> BattleMaster::BuildRoundChipPlacementCells(bool is1P) const {
+        std::vector<IntVector2> result;
+        const UnitBase* unit = GetUnitBySide(is1P);
+        if (!unit) return result;
+
+        const IntVector2 base = unit->GetGridPos();
+        for (int dy = -1; dy <= 1; ++dy) {
+            for (int dx = -1; dx <= 1; ++dx) {
+                if (dx == 0 && dy == 0) continue;
+                const IntVector2 pos{ base.x + dx, base.y + dy };
+                if (!m_mapGrid.IsWithinBounds(pos.x, pos.y)) continue;
+                if (IsOccupiedByUnit(pos)) continue;
+                if (m_mapGrid.HasAnyItemAt(pos.x, pos.y)) continue;
+                result.push_back(pos);
+            }
+        }
+        return result;
+    }
+
+    bool BattleMaster::ExecuteRoundCalculation(
+        UnitBase& actor,
+        int operand,
+        bool operandWasChip,
+        IntVector2 chipSource) {
+
+        const bool is1P = (&actor == m_player.get());
+        const char op = is1P ? m_p1TurnOperator : m_p2TurnOperator;
+        const int left = actor.GetNumber();
+
+        const BattleCalculationResult calc =
+            m_rule.CalculateRoundArithmeticResult(left, operand, op);
+
+        if (!calc.valid) {
+            AddLog("【計算不可】 その演算は成立しません。");
+            ProceduralAudio::GetInstance().PlayErrorSE();
+            return false;
+        }
+
+        if (operandWasChip) {
+            const int consumed = m_mapGrid.PickUpNumberChip(chipSource.x, chipSource.y);
+            if (consumed == 0) return false;
+        }
+
+        actor.SetNumber(calc.normalizedValue);
+
+        m_roundResultPending = true;
+        m_roundChipPlacementPending = false;
+        m_roundPendingIs1P = is1P;
+        m_roundPendingResult = calc.normalizedValue;
+        m_roundPendingRaw = calc.rawValue;
+        m_roundPendingOperand = operand;
+        m_roundPendingOperandWasChip = operandWasChip;
+        m_roundPendingChipSource = chipSource;
+
+        AddLog("【計算】 " + std::to_string(left) + " " +
+            std::string(1, op) + " " + std::to_string(operand) +
+            " = " + std::to_string(calc.rawValue) +
+            " -> [" + std::to_string(calc.normalizedValue) + "]");
+
+        if (op == '/') {
+            const IntVector2 nodePos = m_rule.GetWarpGrid(left, operand);
+            if (!actor.HasWarpNode(nodePos)) {
+                actor.AddWarpNode(nodePos);
+                AddLog("【ワープ】 (" + std::to_string(left) + "," +
+                    std::to_string(operand) + ") にワープを生成");
+            }
+        }
+
+        ProceduralAudio::GetInstance().PlayPowerSE(calc.normalizedValue);
+        return true;
+    }
+
+    void BattleMaster::ResolveRoundResultToTotal() {
+        if (!m_roundResultPending) return;
+
+        Fraction& total = m_roundPendingIs1P ? m_p1RoundScore : m_p2RoundScore;
+        const Fraction next = total + Fraction(m_roundPendingResult);
+        if (next > Fraction(m_roundTarget)) {
+            AddLog("【加算不可】 目標値を超えるため合計値へ加算できません。");
+            ProceduralAudio::GetInstance().PlayErrorSE();
+            return;
+        }
+
+        total = next;
+        AddLog(std::string("【合計値】 ") +
+            (m_roundPendingIs1P ? "1P " : "2P ") +
+            "+ " + std::to_string(m_roundPendingResult) +
+            " -> " + total.ToString());
+
+        m_roundResultPending = false;
+        m_roundChipPlacementPending = false;
+
+        if (m_rule.IsRoundTargetReached(total, m_roundTarget)) {
+            EndRound(m_roundPendingIs1P ? 1 : 2);
+        }
+        else {
+            FinishActionPhase(m_roundPendingIs1P);
+        }
+    }
+
+    bool BattleMaster::BeginRoundChipPlacement() {
+        if (!m_roundResultPending) return false;
+        const auto cells = BuildRoundChipPlacementCells(m_roundPendingIs1P);
+        if (cells.empty()) {
+            AddLog("【チップ配置不可】 配置できる周囲マスがありません。");
+            ProceduralAudio::GetInstance().PlayErrorSE();
+
+            const Fraction& total = m_roundPendingIs1P ? m_p1RoundScore : m_p2RoundScore;
+            if (total + Fraction(m_roundPendingResult) > Fraction(m_roundTarget)) {
+                const bool is1P = m_roundPendingIs1P;
+                AddLog("【結果消滅】 合計値にも加えられないため、この計算結果は消滅します。");
+                m_roundResultPending = false;
+                m_roundChipPlacementPending = false;
+                FinishActionPhase(is1P);
+            }
+            return false;
+        }
+
+        m_roundChipPlacementPending = true;
+        AddLog("【数字チップ】 配置するマスをクリック");
+        return true;
+    }
+
+    bool BattleMaster::PlacePendingRoundChip(IntVector2 pos) {
+        if (!m_roundResultPending || !m_roundChipPlacementPending) return false;
+
+        const auto cells = BuildRoundChipPlacementCells(m_roundPendingIs1P);
+        if (std::find(cells.begin(), cells.end(), pos) == cells.end()) {
+            ProceduralAudio::GetInstance().PlayErrorSE();
+            return false;
+        }
+
+        m_mapGrid.SetNumberChipAt(pos.x, pos.y, m_roundPendingResult);
+        AddLog("【チップ配置】 [" + std::to_string(m_roundPendingResult) + "] -> (" +
+            std::to_string(pos.x + 1) + "," + std::to_string(9 - pos.y) + ")");
+
+        const bool is1P = m_roundPendingIs1P;
+        m_roundResultPending = false;
+        m_roundChipPlacementPending = false;
+        FinishActionPhase(is1P);
+        return true;
+    }
+
+    bool BattleMaster::GetRoundActionClick(bool is1P, Vector2& mousePos) {
+        bool isClick = false;
+        const bool isOnline = (NetworkManager::GetInstance() != nullptr &&
+            NetworkManager::GetInstance()->GetState() != NetworkManager::State::OFFLINE);
+
+        bool isMyTurn = true;
+        if (isOnline) {
+            isMyTurn = (is1P == NetworkManager::GetInstance()->IsHost());
+        }
+
+        if (isOnline) {
+            if (isMyTurn) {
+                auto& input = InputManager::GetInstance();
+                if (input.IsMouseLeftTrg()) {
+                    isClick = true;
+                    mousePos = input.GetMousePos();
+
+                    BattlePacket packet;
+                    packet.actionType = NetAction::ACTION;
+                    packet.targetX = static_cast<int>(mousePos.x);
+                    packet.targetY = static_cast<int>(mousePos.y);
+                    NetworkManager::GetInstance()->SendBattlePacket(packet);
+                }
+            }
+            else {
+                BattlePacket packet;
+                if (NetworkManager::GetInstance()->ReceiveBattlePacket(packet) &&
+                    packet.actionType == NetAction::ACTION) {
+                    isClick = true;
+                    mousePos = Vector2(
+                        static_cast<float>(packet.targetX),
+                        static_cast<float>(packet.targetY));
+                }
+            }
+        }
+        else {
+            auto& input = InputManager::GetInstance();
+            if (input.IsMouseLeftTrg()) {
+                isClick = true;
+                mousePos = input.GetMousePos();
+            }
+        }
+        return isClick;
+    }
+
+    bool BattleMaster::HandleRoundPendingActionInput(bool is1P) {
+        if (!m_rule.IsRoundBattle() || (!m_roundResultPending && !m_roundChipPlacementPending)) {
+            return false;
+        }
+
+        if (m_roundPendingIs1P != is1P) return true;
+
+        Vector2 mousePos;
+        if (!GetRoundActionClick(is1P, mousePos)) return true;
+
+        if (m_roundChipPlacementPending) {
+            const IntVector2 grid = m_mapGrid.ScreenToGrid(mousePos);
+            PlacePendingRoundChip(grid);
+            return true;
+        }
+
+        constexpr int y = 650;
+        constexpr int h = 90;
+        constexpr int totalX = 700;
+        constexpr int chipX = 980;
+        constexpr int w = 240;
+
+        if (CheckButtonClick(totalX, y, w, h, mousePos)) {
+            ResolveRoundResultToTotal();
+        }
+        else if (CheckButtonClick(chipX, y, w, h, mousePos)) {
+            BeginRoundChipPlacement();
+        }
+        return true;
+    }
+
 
     BattleViewData BattleMaster::BuildBattleViewData() const {
         BattleViewData view;
@@ -744,6 +1173,26 @@ namespace App {
         view.roundPlacedPos1 = m_roundPlacedPos1;
         view.roundPlacedPos2 = m_roundPlacedPos2;
         view.roundWinner = m_roundWinner;
+        view.p1RoundWins = m_p1RoundWins;
+        view.p2RoundWins = m_p2RoundWins;
+        view.p1FixedOperator = m_p1DraftedOperator;
+        view.p2FixedOperator = m_p2DraftedOperator;
+        view.p1SubOperator = m_p1SubOperator;
+        view.p2SubOperator = m_p2SubOperator;
+        view.p1TurnOperator = m_p1TurnOperator;
+        view.p2TurnOperator = m_p2TurnOperator;
+        view.p1UsingSub = m_p1UsingSub;
+        view.p2UsingSub = m_p2UsingSub;
+        view.roundResultPending = m_roundResultPending;
+        view.roundChipPlacementPending = m_roundChipPlacementPending;
+        view.roundPendingIs1P = m_roundPendingIs1P;
+        view.roundPendingResult = m_roundPendingResult;
+        view.roundPendingRaw = m_roundPendingRaw;
+        if (m_roundResultPending) {
+            const Fraction& total = m_roundPendingIs1P ? m_p1RoundScore : m_p2RoundScore;
+            view.roundCanAddTotal =
+                !(total + Fraction(m_roundPendingResult) > Fraction(m_roundTarget));
+        }
         if (IsOnlineBattle()) {
             if (m_roundPhase == RoundPhase::SELECT_P1_NUMBER || m_roundPhase == RoundPhase::DRAFT_P1_OPERATOR) {
                 view.roundWaitingForRemote = !IsLocalRoundController(true);
@@ -886,6 +1335,36 @@ namespace App {
         view.humanActionPhase = isActionPhase && ((view.is1PTurn && !m_is1P_NPC) || (!view.is1PTurn && !m_is2P_NPC));
 
         Vector2 mousePos = InputManager::GetInstance().GetMousePos();
+        if (m_rule.IsRoundBattle() && activeActor) {
+            const bool activeIsHuman =
+                (activeIs1P && !m_is1P_NPC) || (!activeIs1P && !m_is2P_NPC);
+            if (activeIsHuman) {
+                view.hoverRoundFixedButton =
+                    CheckButtonClick(610, 850, 330, 70, mousePos);
+                view.hoverRoundSubButton =
+                    CheckButtonClick(980, 850, 330, 70, mousePos);
+                view.hoverRoundPlayerCalcButton =
+                    CheckButtonClick(610, 960, 210, 60, mousePos);
+                view.hoverRoundChipCalcButton =
+                    CheckButtonClick(855, 960, 210, 60, mousePos);
+                view.hoverRoundTotalButton =
+                    CheckButtonClick(700, 650, 240, 90, mousePos);
+                view.hoverRoundChipButton =
+                    CheckButtonClick(980, 650, 240, 90, mousePos);
+            }
+
+            view.roundPlayerCalcAvailable =
+                activeTarget && m_rule.IsAdjacent(activeActor->GetGridPos(), activeTarget->GetGridPos());
+            view.roundChipOperand =
+                m_mapGrid.GetNumberChipAt(activeActor->GetGridPos().x, activeActor->GetGridPos().y);
+            view.roundChipCalcAvailable = view.roundChipOperand > 0;
+
+            if (m_roundChipPlacementPending) {
+                view.roundChipPlacementCells =
+                    BuildRoundChipPlacementCells(m_roundPendingIs1P);
+            }
+        }
+
         view.hoverNoActionButton = CheckButtonClick(1100, 960, 220, 60, mousePos);
         view.hoverEndTurnButton = CheckButtonClick(750, 960, 420, 60, mousePos);
         view.hoverPauseButton = CheckButtonClick(SCREEN_W - 180, 10, 160, 50, mousePos);
@@ -909,13 +1388,13 @@ namespace App {
         int calcRight = 0;
         char calcOp = '\0';
 
-        if (isActionPhase && view.canAttack && view.hasOperator && activeActor && activeTarget) {
+        if (!m_rule.IsRoundBattle() && isActionPhase && view.canAttack && view.hasOperator && activeActor && activeTarget) {
             view.calculation.visible = true;
             calcLeft = activeActor->GetNumber();
             calcRight = activeTarget->GetNumber();
             calcOp = activeActor->GetOp();
         }
-        else if (isMovePhase && movePreview && previewNextToEnemy && activeActor && activeTarget && previewOp != '\0') {
+        else if (!m_rule.IsRoundBattle() && isMovePhase && movePreview && previewNextToEnemy && activeActor && activeTarget && previewOp != '\0') {
             view.calculation.visible = true;
             view.calculation.movePreview = true;
             calcLeft = previewNumber;
@@ -1060,6 +1539,10 @@ namespace App {
 
         if (!isClick) return;
 
+        if (m_rule.IsRoundBattle() && HandleRoundOperatorMouse(Is1PTurn(), mousePos)) {
+            return;
+        }
+
         IntVector2 targetGrid = m_mapGrid.ScreenToGrid(mousePos);
         IntVector2 pos = activeUnit.GetGridPos();
 
@@ -1126,6 +1609,73 @@ namespace App {
 
         const bool is1P = (&actor == m_player.get());
 
+        if (m_rule.IsRoundBattle()) {
+            if (HandleRoundPendingActionInput(is1P)) return;
+
+            IntVector2 pos = actor.GetGridPos();
+
+            // SUBを移動で使用した場合、着地した時点で旧SUBを消費。
+            // このあと新しいSUBを拾っても、新SUBまで消えないようにする。
+            bool& usingSub = is1P ? m_p1UsingSub : m_p2UsingSub;
+            char& sub = is1P ? m_p1SubOperator : m_p2SubOperator;
+            char& turnOp = is1P ? m_p1TurnOperator : m_p2TurnOperator;
+            if (usingSub) {
+                const char usedOp = turnOp;
+                AddLog(std::string("【サブ演算子使用】 ") + (is1P ? "1P" : "2P") +
+                    " [" + std::string(1, usedOp) + "] を消費");
+                sub = '\0';
+                usingSub = false;
+                turnOp = usedOp; // このターンの計算までは同じ演算子を使う
+                actor.SetOp(usedOp);
+            }
+
+            const char pickedItem = m_mapGrid.PickUpItem(pos.x, pos.y);
+            if (pickedItem != '\0') {
+                sub = pickedItem;
+                AddLog(std::string("【サブ演算子取得】 ") + (is1P ? "1P" : "2P") +
+                    " [" + std::string(1, pickedItem) + "] をサブ演算子枠へ取得");
+                ProceduralAudio::GetInstance().PlayPowerSE(
+                    pickedItem == '+' ? 5 : pickedItem == '-' ? 2 : pickedItem == '*' ? 7 : 9);
+            }
+
+            const bool playerCalcAvailable =
+                m_rule.IsAdjacent(pos, targetUnit.GetGridPos());
+            const int chipOperand = GetRoundChipOperandForActor(actor);
+            const bool chipCalcAvailable = chipOperand > 0;
+
+            if (!playerCalcAvailable && !chipCalcAvailable) {
+                AddLog("【待機】 計算対象がないため行動終了");
+                FinishActionPhase(is1P);
+                return;
+            }
+
+            Vector2 mousePos;
+            if (!GetRoundActionClick(is1P, mousePos)) return;
+
+            if (playerCalcAvailable &&
+                CheckButtonClick(610, 960, 210, 60, mousePos)) {
+                ExecuteRoundCalculation(
+                    actor,
+                    targetUnit.GetNumber(),
+                    false,
+                    IntVector2{ -1, -1 });
+                return;
+            }
+
+            if (chipCalcAvailable &&
+                CheckButtonClick(855, 960, 210, 60, mousePos)) {
+                ExecuteRoundCalculation(actor, chipOperand, true, pos);
+                return;
+            }
+
+            if (CheckButtonClick(1100, 960, 220, 60, mousePos)) {
+                AddLog("【待機】 行動を終了");
+                ProceduralAudio::GetInstance().PlayPowerSE(2);
+                FinishActionPhase(is1P);
+            }
+            return;
+        }
+
         IntVector2 pos = actor.GetGridPos();
         char pickedItem = m_mapGrid.PickUpItem(pos.x, pos.y);
         if (pickedItem != '\0') {
@@ -1155,8 +1705,8 @@ namespace App {
         bool isClick = false;
         Vector2 mousePos;
 
-        // ★ 判定条件をOFFLINE以外で統一
-        bool isOnline = (NetworkManager::GetInstance() != nullptr && NetworkManager::GetInstance()->GetState() != NetworkManager::State::OFFLINE);
+        bool isOnline = (NetworkManager::GetInstance() != nullptr &&
+            NetworkManager::GetInstance()->GetState() != NetworkManager::State::OFFLINE);
         bool isMyTurn = true;
         if (isOnline) {
             bool isHost = NetworkManager::GetInstance()->IsHost();
@@ -1220,9 +1770,7 @@ namespace App {
             actionDone = true;
         }
 
-        if (actionDone) {
-            FinishActionPhase(is1P);
-        }
+        if (actionDone) FinishActionPhase(is1P);
     }
 
 
@@ -1230,6 +1778,98 @@ namespace App {
 
     void BattleMaster::ExecuteAIAction(UnitBase* me, UnitBase* opp, bool is1P) {
         if (!me || !opp || me->IsMoving() || !m_ai) return;
+
+        if (m_rule.IsRoundBattle()) {
+            if (m_roundResultPending || m_roundChipPlacementPending) return;
+
+            const std::string myName = is1P ? "1P" : "2P";
+            const IntVector2 myPos = me->GetGridPos();
+
+            bool& usingSub = is1P ? m_p1UsingSub : m_p2UsingSub;
+            char& sub = is1P ? m_p1SubOperator : m_p2SubOperator;
+            char& turnOp = is1P ? m_p1TurnOperator : m_p2TurnOperator;
+
+            if (usingSub) {
+                const char usedOp = turnOp;
+                sub = '\0';
+                usingSub = false;
+                turnOp = usedOp;
+                me->SetOp(usedOp);
+                AddLog("【サブ演算子使用】 " + myName + " [" + std::string(1, usedOp) + "] を消費");
+            }
+
+            const char pickedItem = m_mapGrid.PickUpItem(myPos.x, myPos.y);
+            if (pickedItem != '\0') {
+                sub = pickedItem;
+                AddLog("【サブ演算子取得】 " + myName + " [" + std::string(1, pickedItem) + "] を取得");
+            }
+
+            struct Candidate {
+                int operand = 0;
+                bool chip = false;
+                IntVector2 chipPos{ -1, -1 };
+                int eval = -9999999;
+            };
+
+            Candidate best;
+            const Fraction& total = is1P ? m_p1RoundScore : m_p2RoundScore;
+            const int remaining = m_roundTarget - static_cast<int>(total.n / total.d);
+
+            auto evaluate = [&](int operand, bool chip, IntVector2 chipPos) {
+                const auto calc = m_rule.CalculateRoundArithmeticResult(me->GetNumber(), operand, turnOp);
+                if (!calc.valid) return;
+                int eval = calc.normalizedValue * 100;
+                if (calc.normalizedValue == remaining) eval += 1000000;
+                else if (calc.normalizedValue > remaining) eval -= 3000;
+                if (chip) eval += 80;
+                if (eval > best.eval) {
+                    best = Candidate{ operand, chip, chipPos, eval };
+                }
+                };
+
+            if (m_rule.IsAdjacent(myPos, opp->GetGridPos())) {
+                evaluate(opp->GetNumber(), false, IntVector2{ -1, -1 });
+            }
+
+            const int chipValue = m_mapGrid.GetNumberChipAt(myPos.x, myPos.y);
+            if (chipValue > 0) {
+                evaluate(chipValue, true, myPos);
+            }
+
+            if (best.operand <= 0) {
+                AddLog("【待機】 " + myName + " は計算対象なし");
+                FinishActionPhase(is1P);
+            }
+            else if (ExecuteRoundCalculation(*me, best.operand, best.chip, best.chipPos)) {
+                const Fraction& nowTotal = is1P ? m_p1RoundScore : m_p2RoundScore;
+                const Fraction next = nowTotal + Fraction(m_roundPendingResult);
+
+                if (!(next > Fraction(m_roundTarget))) {
+                    ResolveRoundResultToTotal();
+                }
+                else if (BeginRoundChipPlacement()) {
+                    auto cells = BuildRoundChipPlacementCells(is1P);
+                    if (!cells.empty()) {
+                        // 盤面中央に近いマスを優先。再現可能な決定でテストしやすくする。
+                        std::sort(cells.begin(), cells.end(), [](const IntVector2& a, const IntVector2& b) {
+                            const int da = std::abs(a.x - 4) + std::abs(a.y - 4);
+                            const int db = std::abs(b.x - 4) + std::abs(b.y - 4);
+                            if (da != db) return da < db;
+                            if (a.y != b.y) return a.y < b.y;
+                            return a.x < b.x;
+                            });
+                        PlacePendingRoundChip(cells.front());
+                    }
+                }
+                else {
+                    FinishActionPhase(is1P);
+                }
+            }
+
+            if (is1P) m_playerAIStarted = false;
+            else m_enemyAIStarted = false;
+            return;
+        }
 
         const std::string myName = is1P ? "1P" : "2P";
         const IntVector2 myPos = me->GetGridPos();
@@ -1253,8 +1893,8 @@ namespace App {
         context.enemy = opp;
         context.is1P = is1P;
         context.rule = &m_rule;
-        context.p1Score = m_rule.IsRoundBattle() ? m_p1RoundScore : m_p1ZeroOneScore;
-        context.p2Score = m_rule.IsRoundBattle() ? m_p2RoundScore : m_p2ZeroOneScore;
+        context.p1Score = m_p1ZeroOneScore;
+        context.p2Score = m_p2ZeroOneScore;
         context.roundTarget = m_roundTarget;
 
         const BattleAI::ActionTarget target = m_ai->ChooseActionTarget(context);
@@ -1521,6 +2161,31 @@ namespace App {
     void BattleMaster::ExecuteAI(UnitBase* me, UnitBase* opp, bool is1P) {
         if (!me || !opp || !m_ai) return;
 
+        if (m_rule.IsRoundBattle()) {
+            const char fixedOp = is1P ? m_p1DraftedOperator : m_p2DraftedOperator;
+            const char subOp = is1P ? m_p1SubOperator : m_p2SubOperator;
+            bool chooseSub = false;
+
+            if (subOp != '\0') {
+                const Fraction& total = is1P ? m_p1RoundScore : m_p2RoundScore;
+                const int remaining = m_roundTarget - static_cast<int>(total.n / total.d);
+                const auto fixedCalc = m_rule.CalculateRoundArithmeticResult(
+                    me->GetNumber(), opp->GetNumber(), fixedOp);
+                const auto subCalc = m_rule.CalculateRoundArithmeticResult(
+                    me->GetNumber(), opp->GetNumber(), subOp);
+
+                if (subCalc.valid && subCalc.normalizedValue == remaining) {
+                    chooseSub = true;
+                }
+                else if (subCalc.valid &&
+                    (!fixedCalc.valid ||
+                        (fixedCalc.normalizedValue > remaining && subCalc.normalizedValue <= remaining))) {
+                    chooseSub = true;
+                }
+            }
+            SelectRoundTurnOperator(is1P, chooseSub);
+        }
+
         BattleAI::MoveContext context;
         context.map = &m_mapGrid;
         context.me = me;
@@ -1558,6 +2223,15 @@ namespace App {
     }
 
     void BattleMaster::ExecuteBattle(UnitBase& attacker, UnitBase& defender, UnitBase& target) {
+        if (m_rule.IsRoundBattle()) {
+            ExecuteRoundCalculation(
+                attacker,
+                defender.GetNumber(),
+                false,
+                IntVector2{ -1, -1 });
+            return;
+        }
+
         char aOp = attacker.GetOp();
         int aNum = attacker.GetNumber();
         int dNum = defender.GetNumber();
@@ -1623,7 +2297,7 @@ namespace App {
                 intRes, resultFrac, op, isCleanDivide);
 
             if (!next.valid) {
-                AddLog("【反映】 割り切れなかったため、ROUND SCORE / POWER は変化しません。");
+                AddLog("【反映】 割り切れなかったため、ラウンド合計値 / パワーは変化しません。");
                 return;
             }
 
@@ -1633,19 +2307,19 @@ namespace App {
             const Fraction goal(m_roundTarget);
 
             if (raw > goal) {
-                AddLog("【SCORE】 " + targetName + " : " + previous.ToString() + " -> " + raw.ToString());
-                AddLog("【BOUNCE】 TARGET超過 -> " + currentScore.ToString());
+                AddLog("【合計値】 " + targetName + " : " + previous.ToString() + " -> " + raw.ToString());
+                AddLog("【跳ね返り】 目標値超過 -> " + currentScore.ToString());
             }
             else {
-                AddLog("【SCORE】 " + targetName + " : " + previous.ToString() + " -> " + currentScore.ToString());
+                AddLog("【合計値】 " + targetName + " : " + previous.ToString() + " -> " + currentScore.ToString());
             }
 
             unit.SetNumber(next.number);
-            AddLog("【POWER】 " + targetName + " -> " + std::to_string(next.number));
+            AddLog("【パワー】 " + targetName + " -> " + std::to_string(next.number));
             ProceduralAudio::GetInstance().PlayPowerSE(next.number);
 
             if (m_rule.IsRoundTargetReached(currentScore, m_roundTarget)) {
-                AddLog("【TARGET JUST】 " + targetName + " が " + std::to_string(m_roundTarget) + " に到達！");
+                AddLog("【目標値到達】 " + targetName + " が " + std::to_string(m_roundTarget) + " に到達！");
                 EndRound(targetIs1P ? 1 : 2);
             }
             return;
@@ -1763,7 +2437,7 @@ namespace App {
                 unit.GetNumber(), unit.GetStocks(), -delta);
             const int before = unit.GetNumber();
             unit.SetNumber(next.number);
-            AddLog("【POWER】 " + targetName + " " + reason + " : " +
+            AddLog("【パワー】 " + targetName + " " + reason + " : " +
                 std::to_string(before) + " -> " + std::to_string(next.number));
             return;
         }

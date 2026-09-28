@@ -98,6 +98,9 @@ namespace App {
         BattleFraction fraction{ 0, 1 };
         int intValue = 0;
         bool cleanDivide = true;
+        bool valid = true;
+        int rawValue = 0;
+        int normalizedValue = 0;
     };
 
     struct BattleSimulatedUnitState {
@@ -142,6 +145,12 @@ namespace App {
             int attackerNumber,
             int defenderNumber,
             char op) const;
+        BattleCalculationResult CalculateRoundArithmeticResult(
+            int leftNumber,
+            int rightNumber,
+            char op) const;
+        int NormalizeRoundValue(int value) const;
+
         IntVector2 GetWarpGrid(int attackerNumber, int defenderNumber) const;
 
         BattleFraction CalculateBouncedScore(

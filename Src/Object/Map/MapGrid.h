@@ -30,6 +30,11 @@ namespace App {
     // MapGrid: バトルマップの管理クラス
     // 用途: グリッド座標管理、アイテム配置、ターン更新
     // ==========================================
+    struct NumberChip {
+        IntVector2 pos{ -1, -1 };
+        int value = 0;
+    };
+
     class MapGrid {
     public:
         // ==========================================
@@ -61,7 +66,12 @@ namespace App {
         // アイテム管理
         // ==========================================
         char PickUpItem(int x, int y);                         // アイテム取得（取得後消える）
-        char GetItemAt(int x, int y) const;                    // アイテム確認（消えない）
+        char GetItemAt(int x, int y) const;
+        int GetNumberChipAt(int x, int y) const;
+        int PickUpNumberChip(int x, int y);
+        void SetNumberChipAt(int x, int y, int value);
+        void ClearNumberChips();
+        bool HasAnyItemAt(int x, int y) const;                    // アイテム確認（消えない）
 
         // ==========================================
         // 描画
@@ -98,7 +108,8 @@ namespace App {
         // ==========================================
         // アイテムシステム
         // ==========================================
-        std::vector<SpawnPoint> m_spawnPoints;  // 出現地点のリスト
+        std::vector<SpawnPoint> m_spawnPoints;
+        std::vector<NumberChip> m_numberChips;  // 出現地点のリスト
 
         // ==========================================
         // ルール設定

@@ -156,6 +156,35 @@ namespace App {
         IntVector2 roundPlacedPos1{ -1, -1 };
         IntVector2 roundPlacedPos2{ -1, -1 };
         int roundWinner = 0;
+        int p1RoundWins = 0;
+        int p2RoundWins = 0;
+
+        char p1FixedOperator = '\0';
+        char p2FixedOperator = '\0';
+        char p1SubOperator = '\0';
+        char p2SubOperator = '\0';
+        char p1TurnOperator = '\0';
+        char p2TurnOperator = '\0';
+        bool p1UsingSub = false;
+        bool p2UsingSub = false;
+
+        bool roundResultPending = false;
+        bool roundChipPlacementPending = false;
+        bool roundPendingIs1P = true;
+        int roundPendingResult = 0;
+        int roundPendingRaw = 0;
+        bool roundCanAddTotal = false;
+        bool hoverRoundFixedButton = false;
+        bool hoverRoundSubButton = false;
+        bool hoverRoundPlayerCalcButton = false;
+        bool hoverRoundChipCalcButton = false;
+        bool hoverRoundTotalButton = false;
+        bool hoverRoundChipButton = false;
+        bool roundPlayerCalcAvailable = false;
+        bool roundChipCalcAvailable = false;
+        int roundChipOperand = 0;
+        std::vector<IntVector2> roundChipPlacementCells;
+
 
         int totalTurns = 0;
         int targetScore = 0;

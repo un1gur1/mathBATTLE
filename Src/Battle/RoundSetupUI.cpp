@@ -1,4 +1,4 @@
-#define NOMINMAX
+ï»¿#define NOMINMAX
 #include <DxLib.h>
 
 #include "RoundSetupUI.h"
@@ -34,10 +34,14 @@ namespace App {
             const int totalW = BOX_W * COUNT + GAP * (COUNT - 1);
             const int startX = (SCREEN_W - totalW) / 2;
 
+            int mx = 0, my = 0;
+            GetMousePoint(&mx, &my);
+
             for (int i = 0; i < COUNT; ++i) {
                 const int number = i + 1;
                 const int x = startX + i * (BOX_W + GAP);
-                const bool selected = (number == view.roundNumberCursor);
+                const bool hover = mx >= x && mx <= x + BOX_W && my >= y && my <= y + BOX_H;
+                const bool selected = (number == view.roundNumberCursor) || hover;
                 const unsigned int edge = selected ? accent : GetColor(65, 90, 115);
                 const unsigned int base = selected ? GetColor(20, 45, 60) : GetColor(8, 15, 28);
 
@@ -60,10 +64,14 @@ namespace App {
             const int totalW = BOX_W * 4 + GAP * 3;
             const int startX = (SCREEN_W - totalW) / 2;
 
+            int mx = 0, my = 0;
+            GetMousePoint(&mx, &my);
+
             for (int i = 0; i < 4; ++i) {
                 const int x = startX + i * (BOX_W + GAP);
                 const bool available = view.roundOperatorAvailable[i];
-                const bool selected = available && i == view.roundOperatorCursor;
+                const bool hover = mx >= x && mx <= x + BOX_W && my >= y && my <= y + BOX_H;
+                const bool selected = available && (i == view.roundOperatorCursor || hover);
                 const unsigned int edge = selected ? accent : (available ? GetColor(85, 115, 145) : COL_DIM());
                 const unsigned int base = available ? GetColor(10, 22, 38) : GetColor(14, 16, 20);
 
@@ -122,14 +130,24 @@ namespace App {
         const int f28 = GetCachedFont(28);
         const int f22 = GetCachedFont(22);
 
-        DrawCenteredText(panelY + 32, "ROUND " + std::to_string(view.roundNumber), accent, f72);
+        DrawCenteredText(panelY + 32, "ãƒ©ã‚¦ãƒ³ãƒ‰ " + std::to_string(view.roundNumber), accent, f72);
 
         switch (view.roundPhase) {
         case BattleRoundViewPhase::ROUND_START:
-            DrawCenteredText(panelY + 175, "ƒ‰ƒEƒ“ƒhŠJn", COL_TEXT_MAIN(), f52);
-            DrawCenteredText(panelY + 285, "P1 / P2 ‚ª 1-9 ‚©‚ç‰Šú”š‚ğ‘I‘ğ", COL_TEXT_SUB(), f30);
-            DrawCenteredText(panelY + 390, "TARGET = 9 + P1 + P2", COL_SAFE(), f48);
-            DrawCenteredText(panelY + 520, "[SPACE / ENTER] START", COL_TEXT_SUB(), f28);
+            DrawCenteredText(panelY + 175, "ãƒ©ã‚¦ãƒ³ãƒ‰é–‹å§‹", COL_TEXT_MAIN(), f52);
+            DrawCenteredText(panelY + 285, "P1 / P2 ãŒ 1-9 ã‹ã‚‰åˆæœŸæ•°å­—ã‚’é¸æŠ", COL_TEXT_SUB(), f30);
+            DrawCenteredText(panelY + 390, "ç›®æ¨™å€¤ = 9 + P1 + P2", COL_SAFE(), f48);
+            {
+                const int bx = 760;
+                const int by = 720;
+                const int bw = 400;
+                const int bh = 70;
+                int mx = 0, my = 0;
+                GetMousePoint(&mx, &my);
+                const bool hover = mx >= bx && mx <= bx + bw && my >= by && my <= by + bh;
+                DrawCyberButton(bx, by, bw, bh, "é–‹å§‹", accent, hover, f30);
+                DrawCenteredText(panelY + 590, "ã‚¯ãƒªãƒƒã‚¯ / ã‚¹ãƒšãƒ¼ã‚¹ / ã‚¨ãƒ³ã‚¿ãƒ¼", COL_TEXT_SUB(), f22);
+            }
             break;
 
         case BattleRoundViewPhase::SELECT_P1_NUMBER:
@@ -137,33 +155,33 @@ namespace App {
         {
             const bool is1P = view.roundPhase == BattleRoundViewPhase::SELECT_P1_NUMBER;
             const bool isNPC = is1P ? view.p1.isNPC : view.p2.isNPC;
-            DrawCenteredText(panelY + 140, is1P ? "1P ‰Šú”š‘I‘ğ" : "2P ‰Šú”š‘I‘ğ", COL_TEXT_MAIN(), f48);
+            DrawCenteredText(panelY + 140, is1P ? "1P åˆæœŸæ•°å­—é¸æŠ" : "2P åˆæœŸæ•°å­—é¸æŠ", COL_TEXT_MAIN(), f48);
             if (view.roundWaitingForRemote) {
-                DrawCenteredText(panelY + 310, "OPPONENT SELECTING...", accent, f48);
+                DrawCenteredText(panelY + 310, "ç›¸æ‰‹ãŒé¸æŠä¸­...", accent, f48);
             }
             else if (isNPC) {
-                DrawCenteredText(panelY + 310, "COM THINKING...", accent, f52);
+                DrawCenteredText(panelY + 310, "ã‚³ãƒ³ãƒ”ãƒ¥ãƒ¼ã‚¿ãƒ¼æ€è€ƒä¸­...", accent, f52);
             }
             else {
                 DrawNumberChoices(view, panelY + 250, accent, f48);
-                DrawCenteredText(panelY + 390, "[©][¨] / [1-9] : ‘I‘ğ   [SPACE / ENTER] : Œˆ’è", COL_TEXT_SUB(), f28);
+                DrawCenteredText(panelY + 390, "1ã€œ9ã‚’ã‚¯ãƒªãƒƒã‚¯ã—ã¦é¸æŠ", COL_TEXT_SUB(), f28);
             }
             if (!is1P && view.p1RoundStartNumber > 0) {
-                DrawCenteredText(panelY + 485, "1P SELECT : " + std::to_string(view.p1RoundStartNumber), COL_P1(), f30);
+                DrawCenteredText(panelY + 485, "1Pã®é¸æŠ : " + std::to_string(view.p1RoundStartNumber), COL_P1(), f30);
             }
             break;
         }
 
         case BattleRoundViewPhase::TARGET_REVEAL:
         {
-            DrawCenteredText(panelY + 145, "‰Šú”š Œˆ’è", COL_TEXT_MAIN(), f48);
+            DrawCenteredText(panelY + 145, "åˆæœŸæ•°å­— æ±ºå®š", COL_TEXT_MAIN(), f48);
             DrawCenteredText(panelY + 235,
                 "1P : " + std::to_string(view.p1RoundStartNumber) + "        2P : " + std::to_string(view.p2RoundStartNumber),
                 COL_TEXT_SUB(), f36);
-            const std::string formula = "TARGET = 9 + " + std::to_string(view.p1RoundStartNumber) +
+            const std::string formula = "ç›®æ¨™å€¤ = 9 + " + std::to_string(view.p1RoundStartNumber) +
                 " + " + std::to_string(view.p2RoundStartNumber) + " = " + std::to_string(view.roundTarget);
             DrawCenteredText(panelY + 335, formula, COL_SAFE(), f64);
-            DrawCenteredText(panelY + 500, "NEXT : ‰‰Zqƒhƒ‰ƒtƒg", COL_TEXT_SUB(), f28);
+            DrawCenteredText(panelY + 500, "æ¬¡ã¸ï¼šæ¼”ç®—å­ãƒ‰ãƒ©ãƒ•ãƒˆ", COL_TEXT_SUB(), f28);
             break;
         }
 
@@ -172,52 +190,53 @@ namespace App {
         {
             const bool is1P = view.roundPhase == BattleRoundViewPhase::DRAFT_P1_OPERATOR;
             const bool isNPC = is1P ? view.p1.isNPC : view.p2.isNPC;
-            DrawCenteredText(panelY + 135, is1P ? "1P ‰‰Zqƒhƒ‰ƒtƒg" : "2P ‰‰Zqƒhƒ‰ƒtƒg", COL_TEXT_MAIN(), f48);
+            DrawCenteredText(panelY + 135, is1P ? "1P æ¼”ç®—å­ãƒ‰ãƒ©ãƒ•ãƒˆ" : "2P æ¼”ç®—å­ãƒ‰ãƒ©ãƒ•ãƒˆ", COL_TEXT_MAIN(), f48);
             if (!is1P) {
-                DrawCenteredText(panelY + 200, "1P PICK : [" + OpText(view.p1DraftedOperator) + "]", COL_P1(), f28);
+                DrawCenteredText(panelY + 200, "1Pã®é¸æŠ : [" + OpText(view.p1DraftedOperator) + "]", COL_P1(), f28);
             }
             if (view.roundWaitingForRemote) {
-                DrawCenteredText(panelY + 335, "OPPONENT DRAFTING...", accent, f48);
+                DrawCenteredText(panelY + 335, "ç›¸æ‰‹ãŒæ¼”ç®—å­ã‚’é¸æŠä¸­...", accent, f48);
             }
             else if (isNPC) {
-                DrawCenteredText(panelY + 335, "COM THINKING...", accent, f52);
+                DrawCenteredText(panelY + 335, "ã‚³ãƒ³ãƒ”ãƒ¥ãƒ¼ã‚¿ãƒ¼æ€è€ƒä¸­...", accent, f52);
             }
             else {
                 DrawOperatorChoices(view, panelY + 275, accent, f64);
-                DrawCenteredText(panelY + 455, "[©][¨] / [1-4] : ‘I‘ğ   [SPACE / ENTER] : Œˆ’è", COL_TEXT_SUB(), f28);
+                DrawCenteredText(panelY + 455, "é¸æŠã§ãã‚‹æ¼”ç®—å­ã‚’ã‚¯ãƒªãƒƒã‚¯", COL_TEXT_SUB(), f28);
             }
-            DrawCenteredText(panelY + 535, "ŠeƒvƒŒƒCƒ„[‚ª1ŒÂæ“¾ / c‚è2ŒÂ‚Í”Õ–Ê‚Ö", COL_TEXT_SUB(), f22);
+            DrawCenteredText(panelY + 535, "å„ãƒ—ãƒ¬ã‚¤ãƒ¤ãƒ¼ãŒ1å€‹å–å¾— / æ®‹ã‚Š2å€‹ã¯ç›¤é¢ã¸", COL_TEXT_SUB(), f22);
             break;
         }
 
         case BattleRoundViewPhase::PLACE_OPERATORS:
         {
-            DrawCenteredText(panelY + 135, "‰‰Zq”z’u Š®—¹", COL_TEXT_MAIN(), f48);
+            DrawCenteredText(panelY + 135, "æ¼”ç®—å­é…ç½® å®Œäº†", COL_TEXT_MAIN(), f48);
             DrawCenteredText(panelY + 225,
-                "1P DRAFT [" + OpText(view.p1DraftedOperator) + "]      2P DRAFT [" + OpText(view.p2DraftedOperator) + "]",
+                "1På›ºå®šæ¼”ç®—å­ [" + OpText(view.p1DraftedOperator) + "]      2På›ºå®šæ¼”ç®—å­ [" + OpText(view.p2DraftedOperator) + "]",
                 COL_TEXT_SUB(), f36);
             DrawCenteredText(panelY + 330,
-                "FIELD [" + OpText(view.roundPlacedOperator1) + "]  ->  " + GridText(view.roundPlacedPos1),
+                "ç›¤é¢ [" + OpText(view.roundPlacedOperator1) + "]  ->  " + GridText(view.roundPlacedPos1),
                 COL_SAFE(), f36);
             DrawCenteredText(panelY + 390,
-                "FIELD [" + OpText(view.roundPlacedOperator2) + "]  ->  " + GridText(view.roundPlacedPos2),
+                "ç›¤é¢ [" + OpText(view.roundPlacedOperator2) + "]  ->  " + GridText(view.roundPlacedPos2),
                 COL_SAFE(), f36);
-            DrawCenteredText(panelY + 500, "TARGET " + std::to_string(view.roundTarget) + " / BATTLE START", accent, f36);
+            DrawCenteredText(panelY + 500, "ç›®æ¨™å€¤ " + std::to_string(view.roundTarget) + " / ãƒãƒˆãƒ«é–‹å§‹", accent, f36);
             break;
         }
 
         case BattleRoundViewPhase::ROUND_END:
         {
-            const int loserStocks = view.roundWinner == 1 ? view.p2.stocks : view.p1.stocks;
-            DrawCenteredText(panelY + 145, "ROUND " + std::to_string(view.roundNumber) + " WINNER", COL_TEXT_SUB(), f36);
+            const bool matchDecided = view.p1RoundWins >= 2 || view.p2RoundWins >= 2;
+            DrawCenteredText(panelY + 145, "ãƒ©ã‚¦ãƒ³ãƒ‰ " + std::to_string(view.roundNumber) + " ã®å‹è€…", COL_TEXT_SUB(), f36);
             DrawCenteredText(panelY + 215, std::to_string(view.roundWinner) + "P", accent, f72);
-            DrawCenteredText(panelY + 330, "TARGET " + std::to_string(view.roundTarget) + " JUST!", COL_SAFE(), f48);
+            DrawCenteredText(panelY + 330, "ç›®æ¨™å€¤ " + std::to_string(view.roundTarget) + " ã«ã´ã£ãŸã‚Šåˆ°é”ï¼", COL_SAFE(), f48);
             DrawCenteredText(panelY + 420,
-                "1P STOCK : " + std::to_string(view.p1.stocks) + "      2P STOCK : " + std::to_string(view.p2.stocks),
+                "ãƒ©ã‚¦ãƒ³ãƒ‰å‹åˆ©   1P " + std::to_string(view.p1RoundWins) +
+                "  -  " + std::to_string(view.p2RoundWins) + " 2P",
                 COL_TEXT_MAIN(), f36);
             DrawCenteredText(panelY + 515,
-                loserStocks <= 0 ? "MATCH DECIDED" : "NEXT ROUND",
-                loserStocks <= 0 ? accent : COL_TEXT_SUB(), f30);
+                matchDecided ? "è©¦åˆæ±ºç€" : "æ¬¡ã®ãƒ©ã‚¦ãƒ³ãƒ‰",
+                matchDecided ? accent : COL_TEXT_SUB(), f30);
             break;
         }
 

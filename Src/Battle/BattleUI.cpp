@@ -111,7 +111,7 @@ namespace App {
 
         if (view.roundSetupActive) {
             phaseCol = GetColor(25, 80, 110);
-            phaseName = "ROUND SETUP";
+            phaseName = "ラウンド準備";
         }
         else if (!view.gameOver && view.phase != BattleViewPhase::FINISH) {
             if (view.phase == BattleViewPhase::P1_TurnStart || view.phase == BattleViewPhase::P1_Move) {
@@ -172,8 +172,8 @@ namespace App {
         if (timer <= 75 && timer >= 5) {
             const int f80 = GetCachedFont(80);
             const std::string text = is1P
-                ? (view.p1.isNPC ? "1P (COM) TURN" : "1P TURN")
-                : (view.p2.isNPC ? "2P (COM) TURN" : "2P TURN");
+                ? (view.p1.isNPC ? "1P（コンピューター）のターン" : "1Pのターン")
+                : (view.p2.isNPC ? "2P（コンピューター）のターン" : "2Pのターン");
             const int tw = GetDrawStringWidthToHandle(text.c_str(), static_cast<int>(text.length()), f80);
             const int textX = SCREEN_W / 2 - tw / 2 + (40 - timer);
             const int textY = SCREEN_H / 2 - 40;
@@ -192,7 +192,7 @@ namespace App {
             10,
             160,
             50,
-            "ポーズ (ESC)",
+            "ポーズ（Escキー）",
             COL_WARN(),
             view.hoverPauseButton,
             GetCachedFont(22)
@@ -219,6 +219,162 @@ namespace App {
         }
     }
 
+
+    void BattleUI::DrawRoundBattleControls(const BattleViewData& view) const {
+        if (view.ruleMode != BattleViewRuleMode::ROUND_BATTLE ||
+            view.roundSetupActive ||
+            view.phase == BattleViewPhase::FINISH) {
+            return;
+        }
+
+        const bool is1P = view.is1PTurn;
+        const BattleUnitView& unit = is1P ? view.p1 : view.p2;
+        if (unit.isNPC) return;
+
+        const unsigned int accent = is1P ? COL_P1() : COL_P2();
+        const char fixedOp = is1P ? view.p1FixedOperator : view.p2FixedOperator;
+        const char subOp = is1P ? view.p1SubOperator : view.p2SubOperator;
+        const char turnOp = is1P ? view.p1TurnOperator : view.p2TurnOperator;
+        const bool usingSub = is1P ? view.p1UsingSub : view.p2UsingSub;
+
+        if (view.roundChipPlacementPending) {
+            if (view.map) {
+                for (const auto& pos : view.roundChipPlacementCells) {
+                    const Vector2 center = view.map->GetCellCenter(pos.x, pos.y);
+                    SetDrawBlendMode(DX_BLENDMODE_ALPHA, 85);
+                    DrawBox(
+                        static_cast<int>(center.x) - 36,
+                        static_cast<int>(center.y) - 36,
+                        static_cast<int>(center.x) + 36,
+                        static_cast<int>(center.y) + 36,
+                        COL_SAFE(), TRUE);
+                    SetDrawBlendMode(DX_BLENDMODE_ADD, 220);
+                    DrawBox(
+                        static_cast<int>(center.x) - 39,
+                        static_cast<int>(center.y) - 39,
+                        static_cast<int>(center.x) + 39,
+                        static_cast<int>(center.y) + 39,
+                        COL_SAFE(), FALSE);
+                    SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+                }
+            }
+
+            DrawCyberPanel(650, 815, 620, 150, GetColor(8, 18, 24), COL_SAFE(), 245);
+            DrawStringToHandle(
+                690, 840,
+                ("[" + std::to_string(view.roundPendingResult) + "] 数字チップを置くマスをクリック").c_str(),
+                COL_TEXT_MAIN(),
+                GetCachedFont(30));
+            DrawStringToHandle(
+                690, 900,
+                "自分の周囲8マス / アイテム・駒があるマスは不可",
+                COL_TEXT_SUB(),
+                GetCachedFont(20));
+            return;
+        }
+
+        if (view.roundResultPending) {
+            SetDrawBlendMode(DX_BLENDMODE_ALPHA, 150);
+            DrawBox(0, 0, SCREEN_W, SCREEN_H, GetColor(0, 0, 0), TRUE);
+            SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+
+            DrawCyberPanel(570, 390, 780, 390, GetColor(8, 18, 28), accent, 250);
+            DrawStringToHandle(650, 435, "計算結果", accent, GetCachedFont(34));
+            DrawFormatStringToHandle(
+                650, 500, COL_TEXT_MAIN(), GetCachedFont(54),
+                "%d  ->  [%d]",
+                view.roundPendingRaw,
+                view.roundPendingResult);
+
+            DrawStringToHandle(
+                650, 575,
+                "この結果をどう使う？",
+                COL_TEXT_SUB(),
+                GetCachedFont(26));
+
+            const unsigned int totalCol = view.roundCanAddTotal ? COL_SAFE() : COL_DISABLE();
+            DrawCyberButton(
+                700, 650, 240, 90,
+                view.roundCanAddTotal ? "合計値へ加算" : "合計値（超過）",
+                totalCol,
+                view.hoverRoundTotalButton && view.roundCanAddTotal,
+                GetCachedFont(28));
+
+            DrawCyberButton(
+                980, 650, 240, 90,
+                "数字チップ化",
+                COL_INFO(),
+                view.hoverRoundChipButton,
+                GetCachedFont(28));
+            return;
+        }
+
+        const bool movePhase =
+            view.phase == BattleViewPhase::P1_Move ||
+            view.phase == BattleViewPhase::P2_Move;
+        const bool actionPhase =
+            view.phase == BattleViewPhase::P1_Action ||
+            view.phase == BattleViewPhase::P2_Action;
+
+        if (movePhase) {
+            DrawCyberPanel(590, 820, 740, 120, GetColor(7, 14, 24), accent, 240);
+            DrawStringToHandle(610, 828, "このターンの演算子", COL_TEXT_SUB(), GetCachedFont(18));
+
+            std::string fixedText = "固定演算子  [";
+            fixedText += fixedOp == '\0' ? '-' : fixedOp;
+            fixedText += "]";
+            DrawCyberButton(
+                610, 850, 330, 70,
+                fixedText.c_str(),
+                !usingSub ? accent : COL_TEXT_SUB(),
+                view.hoverRoundFixedButton,
+                GetCachedFont(28));
+
+            std::string subText = "サブ演算子  [";
+            subText += subOp == '\0' ? '-' : subOp;
+            subText += "]";
+            DrawCyberButton(
+                980, 850, 330, 70,
+                subText.c_str(),
+                subOp != '\0' ? COL_INFO() : COL_DISABLE(),
+                view.hoverRoundSubButton && subOp != '\0',
+                GetCachedFont(28));
+
+            DrawFormatStringToHandle(
+                610, 930, COL_TEXT_SUB(), GetCachedFont(18),
+                "選択中 [%c]  / サブ演算子は使用したターンで消費",
+                turnOp == '\0' ? '-' : turnOp);
+        }
+
+        if (actionPhase) {
+            DrawCyberPanel(590, 920, 740, 120, GetColor(7, 14, 24), accent, 245);
+
+            DrawCyberButton(
+                610, 960, 210, 60,
+                "相手と計算",
+                view.roundPlayerCalcAvailable ? accent : COL_DISABLE(),
+                view.hoverRoundPlayerCalcButton && view.roundPlayerCalcAvailable,
+                GetCachedFont(22));
+
+            std::string chipText = view.roundChipCalcAvailable
+                ? "チップ [" + std::to_string(view.roundChipOperand) + "] と計算"
+                : "チップなし";
+            DrawCyberButton(
+                855, 960, 210, 60,
+                chipText.c_str(),
+                view.roundChipCalcAvailable ? COL_SAFE() : COL_DISABLE(),
+                view.hoverRoundChipCalcButton && view.roundChipCalcAvailable,
+                GetCachedFont(22));
+
+            DrawCyberButton(
+                1100, 960, 220, 60,
+                "行動終了",
+                COL_TEXT_SUB(),
+                view.hoverNoActionButton,
+                GetCachedFont(22));
+        }
+    }
+
     void BattleUI::Draw(const BattleViewData& view) const {
         if (!view.map) return;
 
@@ -236,6 +392,7 @@ namespace App {
         DrawTurnStartCutIn(view);
         DrawPauseButton(view);
         DrawFinishOverlay(view);
+        DrawRoundBattleControls(view);
         m_roundSetupUI.Draw(view);
 
         m_commUI.Draw();
@@ -263,7 +420,7 @@ namespace App {
             if (!unit) return;
 
             const unsigned int baseCol = is1P ? COL_P1() : COL_P2();
-            const std::string headerName = is1P ? "1P (YOU)" : "2P (ENEMY)";
+            const std::string headerName = is1P ? "1P（あなた）" : "2P（相手）";
 
             DrawCyberPanel(x, y, 500, 490, GetColor(15, 18, 25), baseCol, 220);
             DrawStringToHandle(x + 15, y + 10, headerName.c_str(), baseCol, GetCachedFont(36));

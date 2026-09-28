@@ -101,6 +101,25 @@ namespace App {
         IntVector2 m_roundPlacedPos1{ -1, -1 };
         IntVector2 m_roundPlacedPos2{ -1, -1 };
         int m_roundWinner = 0;
+        int m_p1RoundWins = 0;
+        int m_p2RoundWins = 0;
+
+        char m_p1SubOperator = '\0';
+        char m_p2SubOperator = '\0';
+        char m_p1TurnOperator = '\0';
+        char m_p2TurnOperator = '\0';
+        bool m_p1UsingSub = false;
+        bool m_p2UsingSub = false;
+
+        bool m_roundResultPending = false;
+        bool m_roundChipPlacementPending = false;
+        bool m_roundPendingIs1P = true;
+        int m_roundPendingResult = 0;
+        int m_roundPendingRaw = 0;
+        int m_roundPendingOperand = 0;
+        bool m_roundPendingOperandWasChip = false;
+        IntVector2 m_roundPendingChipSource{ -1, -1 };
+
 
         IntVector2 m_p1RoundStartPos{ -1, -1 };
         IntVector2 m_p2RoundStartPos{ -1, -1 };
@@ -193,6 +212,21 @@ namespace App {
         bool ReceiveRoundSelection(NetAction action, int& value) const;
         int FindRoundOperatorIndex(char op) const;
         int FindNextAvailableRoundOperatorIndex(int from, int direction) const;
+
+        bool CanRoundMovePath(IntVector2 start, IntVector2 target, char op, bool isWarp) const;
+        void SyncRoundTurnOperator(bool is1P);
+        void SelectRoundTurnOperator(bool is1P, bool useSub);
+        void ConsumeRoundSubIfUsed(bool is1P);
+        bool HandleRoundOperatorMouse(bool is1P, const Vector2& mousePos);
+        bool ExecuteRoundCalculation(UnitBase& actor, int operand, bool operandWasChip, IntVector2 chipSource);
+        void ResolveRoundResultToTotal();
+        bool BeginRoundChipPlacement();
+        bool PlacePendingRoundChip(IntVector2 pos);
+        std::vector<IntVector2> BuildRoundChipPlacementCells(bool is1P) const;
+        bool IsOccupiedByUnit(IntVector2 pos) const;
+        int GetRoundChipOperandForActor(const UnitBase& actor) const;
+        bool HandleRoundPendingActionInput(bool is1P);
+        bool GetRoundActionClick(bool is1P, Vector2& mousePos);
 
         // ---------- UI•\Ž¦—p ----------
         BattleViewData BuildBattleViewData() const;
